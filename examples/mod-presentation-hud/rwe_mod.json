@@ -1,0 +1,12 @@
+{
+  "manifestVersion": 1,
+  "id": "com.example.presentationhud",
+  "name": "Presentation HUD example",
+  "version": "1.0.0",
+  "kind": "presentation",
+  "api": 1,
+  "entry": "scripts/main.lua",
+  "options": [
+    {"key": "expanded", "type": "boolean", "default": true}
+  ]
+}

@@ -324,6 +324,10 @@ namespace rwe
                 command.kind = ChatCommand::Kind::MakePosterUsage;
             }
         }
+        else if (word == "reloadpresentation")
+        {
+            command.kind = ChatCommand::Kind::ReloadPresentation;
+        }
         else if (word == "bps")
         {
             // #911, §6: a local diagnostic toggle, mask one; no message.

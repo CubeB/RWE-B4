@@ -273,7 +273,24 @@ the API, and does not change simulation hashes or RNG simply by being enabled.
 Progress 2026-11-02: a read-only survey fixed the presentation boundary, the
 filtered-query gates, the panel/input/draw/camera/audio attachment points and
 the section-budget rules. Recorded in `MODDING-PRESENTATION-SUBSYSTEM-MAP.md`.
-No presentation runtime exists yet.
+
+Progress 2026-11-03: the first end-to-end slice exists. `PlayerView` is the
+filtered query surface (units, sensor contacts without identity, explored
+features, live-sight projectiles, own resources, static definitions);
+`PresentationRuntime` is a bounded Lua sandbox with `on_frame` and input hooks;
+the draw list is rendered in the scene overlay; orders are filtered twice and
+become ordinary local commands; `+ReloadPresentation` rebuilds packages and
+keeps the running HUD on failure; and `ModKind::Presentation` resolves. The
+`examples/mod-presentation-hud` package loads through the real resolver and
+is exercised by `[presentation]` tests, including a sync hash taken before
+and after a drawing, reading, ordering frame. Recorded in MOD-SDK-013. Still
+open for MOD-10: native `UiPanel` hosting, filtered picking, camera/minimap
+controllers, the audio policy, effect spawn helpers, and a windowed acceptance
+run once MOD-07 supplies a resolved-set launch path. **MOD-10 is not complete.**
+
+Evidence 2026-11-03: `[presentation]` 27 cases (26 passed, 1 retail-data
+skip); full suite 2142 cases, 2137 passed, 5 skipped, 0 failed; a 120-second
+four-scenario hash-oracle record/compare identical at 3599 ticks each.
 
 ### MOD-11: Prove replacement, then expand coverage
 

@@ -147,6 +147,14 @@ namespace rwe
             return;
         }
 
+        // MOD-10: a presentation mod may claim a key, but only after the
+        // message bar, the game menu and the end-game screens have had their
+        // own. A HUD that asks for Enter does not get it over the chat bar.
+        if (presentationConsumesKeyDown(keysym))
+        {
+            return;
+        }
+
         // Suppress UI panel key activation when Ctrl is held — Ctrl+letter is
         // hotkey territory (Ctrl+A select-all, Ctrl+S stop, Ctrl+D self-destruct,
         // etc.), and the panel's letter-bound buttons (e.g. ATTACK on plain "A")
@@ -725,6 +733,15 @@ namespace rwe
             return;
         }
 
+        // MOD-10: the presentation overlay sees a click before the native
+        // panel and the world, and keeps it only if it says it used it. The
+        // matching release is captured with it.
+        presentationMouseCaptured = presentationConsumesMouseDown(event);
+        if (presentationMouseCaptured)
+        {
+            return;
+        }
+
         {
             auto ui = toUiCoordinates(event.x, event.y);
             currentPanel->mouseDown(MouseButtonEvent(ui.x, ui.y, event.button));
@@ -1232,6 +1249,18 @@ namespace rwe
             return;
         }
 
+        if (presentationMouseCaptured)
+        {
+            presentationConsumesMouseUp(event);
+            presentationMouseCaptured = false;
+            return;
+        }
+
+        if (presentationConsumesMouseUp(event))
+        {
+            return;
+        }
+
         {
             auto ui = toUiCoordinates(event.x, event.y);
             currentPanel->mouseUp(MouseButtonEvent(ui.x, ui.y, event.button));
@@ -1466,6 +1495,10 @@ namespace rwe
             }
             return;
         }
+
+        // MOD-10: hover feedback for a HUD, before the panel and the world
+        // move anything.
+        presentationMouseMove(event);
 
         if (auto middleMousePanningState = std::get_if<CameraControlStateMiddleMousePan>(&cameraControlState); middleMousePanningState)
         {

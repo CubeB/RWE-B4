@@ -439,6 +439,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_minimap.cpp
     src/rwe/game/GameScene_peers.cpp
     src/rwe/game/GameScene_poster.cpp
+    src/rwe/game/GameScene_presentation.cpp
     src/rwe/game/GameScene_render.cpp
     src/rwe/game/ReloadBar.cpp
     src/rwe/game/ReloadBar.h
@@ -763,6 +764,13 @@ src/rwe/net/EndpointFamily.h
     src/rwe/mod/ModAiScript.h
     src/rwe/mod/ModAiController.cpp
     src/rwe/mod/ModAiController.h
+    src/rwe/presentation/PresentationDrawList.h
+    src/rwe/presentation/PresentationScript.cpp
+    src/rwe/presentation/PresentationScript.h
+    src/rwe/presentation/PresentationRuntime.cpp
+    src/rwe/presentation/PresentationRuntime.h
+    src/rwe/presentation/PresentationView.cpp
+    src/rwe/presentation/PresentationView.h
     src/rwe/scene/Scene.h
     src/rwe/scene/SceneManager.cpp
     src/rwe/setup/TaInstall.cpp
@@ -1441,6 +1449,8 @@ set(TEST_FILES
     src/rwe/sim/EconomyProvider.test.cpp
     src/rwe/sim/WindProvider.test.cpp
     src/rwe/mod/ModAi.test.cpp
+    src/rwe/presentation/PresentationView.test.cpp
+    src/rwe/presentation/PresentationRuntime.test.cpp
     src/rwe/setup/ArchiveBackend.test.cpp
     src/rwe/sim/wreckcollision.test.cpp
     src/rwe/sim/wreckage.test.cpp
