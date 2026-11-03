@@ -33,4 +33,8 @@ namespace rwe
     // Explicit mod roots; vanilla defaults remain unchanged. MOD-DIRS-01 in
     // docs/TA-MOD-COMPATIBILITY-FINDINGS.md records this RWE extension.
     PathMapping configuredPathMapping(const OpaqueArgs& args);
+
+    // Applies one manifest resourceDirectories entry. Returns false for an
+    // unknown field, so a manifest cannot silently rename nothing.
+    bool applyPathMappingDirectory(PathMapping& mapping, const std::string& name, const std::string& value);
 }

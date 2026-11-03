@@ -1430,6 +1430,7 @@ set(TEST_FILES
     src/rwe/setup/TaInstall.test.cpp
     src/rwe/setup/PackageLibrary.test.cpp
     src/rwe/setup/ModManifest.test.cpp
+    src/rwe/PathMapping.test.cpp
     src/rwe/mod/ModTransform.test.cpp
     src/rwe/mod/ModStateStore.test.cpp
     src/rwe/mod/ModRuntime.test.cpp

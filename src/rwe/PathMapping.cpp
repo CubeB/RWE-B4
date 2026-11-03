@@ -3,6 +3,31 @@
 
 namespace rwe
 {
+    bool applyPathMappingDirectory(PathMapping& mapping, const std::string& name, const std::string& value)
+    {
+        if (name == "ai") mapping.ai = value;
+        else if (name == "anims") mapping.anims = value;
+        else if (name == "bitmaps") mapping.bitmaps = value;
+        else if (name == "camps") mapping.camps = value;
+        else if (name == "downloads") mapping.downloads = value;
+        else if (name == "features") mapping.features = value;
+        else if (name == "fonts") mapping.fonts = value;
+        else if (name == "gamedata") mapping.gamedata = value;
+        else if (name == "guis") mapping.guis = value;
+        else if (name == "builderGuis") mapping.builderGuis = value;
+        else if (name == "maps") mapping.maps = value;
+        else if (name == "objects3d") mapping.objects3d = value;
+        else if (name == "palettes") mapping.palettes = value;
+        else if (name == "scripts") mapping.scripts = value;
+        else if (name == "sounds") mapping.sounds = value;
+        else if (name == "textures") mapping.textures = value;
+        else if (name == "unitpics") mapping.unitpics = value;
+        else if (name == "units") mapping.units = value;
+        else if (name == "weapons") mapping.weapons = value;
+        else return false;
+        return true;
+    }
+
     PathMapping configuredPathMapping(const OpaqueArgs& args)
     {
         PathMapping m;
