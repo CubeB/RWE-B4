@@ -580,6 +580,35 @@ assertions. The full suite passes 2125 cases (2120 passed, 5 skipped) and
 runs, so the test-case count is the stable figure. These are RWE tests of
 RWE-original behaviour, not original-game execution.
 
+## MOD-SDK-011/012: the first subsystem providers
+
+Status: implemented 2026-11-02 in `src/rwe/sim/EconomyProvider.{h,cpp}` and
+`src/rwe/sim/WindProvider.{h,cpp}`, routed through `GameSimulation` and the
+save/hash/dump paths.
+
+These are the first MOD-11 providers. Both are value-only:
+
+- `EconomyProvider::settle(const ResourceAccount&, float) -> SettledResourceAccount`
+  replaces the two once-a-second settle calls. The native provider wraps
+  `settleResourceAccount` unchanged.
+- `WindProvider::update(const WindInput&, std::minstd_rand&) -> WindState`
+  moves the existing `updateWind` arithmetic unchanged and is the first
+  provider that draws from the simulation's random stream.
+
+`GameSimulation` holds each provider behind a forward-declared `unique_ptr`;
+null means the native implementation, so an unmodded game pays no indirection
+and behaves identically. Each provider has a stable id
+(`native.economy@1`, `native.wind@1`) that is written to the save, folded into
+the sync hash and shown in the desync dump. Loading a save that names a
+different provider is refused rather than silently substituting the native
+code.
+
+Evidence: `[economyprovider]` 2 cases, `[windprovider]` 3 cases; full suite
+2131 cases, 2126 passed, 5 skipped, 0 failed. These are RWE tests of
+RWE-original extraction, not original-game execution. The default provider is
+not yet benchmarked against `battle_test`, and no deliberately different
+provider has been installed for a full hash-oracle comparison.
+
 ## Verification
 
 Executed 2026-11-02: `rwe_test "[modsdk]"` and the full `rwe_test` suite; the

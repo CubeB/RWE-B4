@@ -1,4 +1,4 @@
-# RWE modding implementation roadmap
+﻿# RWE modding implementation roadmap
 
 Status: proposed, 2026-11-01. This decomposes [the modding plan](MODDING-PLAN.md)
 into implementation-sized work. The source comparisons and their evidence
@@ -293,8 +293,7 @@ Progress 2026-11-02: the survey recommends the economy settle as the first
 provider (pure value interface, fixed phase, no RNG or entity creation) and
 wind as the second (per-provider RNG and state restoration), with the provider
 pimpl and save/hash/dump order fixed in
-`MODDING-PRESENTATION-SUBSYSTEM-MAP.md`. No provider contract or replacement
-exists yet; the wasm module runtime remains a separate spike.
+`MODDING-PRESENTATION-SUBSYSTEM-MAP.md`. The economy and wind providers now exist: value-only contracts, native defaults wrapping the existing arithmetic unchanged, routed through `GameSimulation`, with provider ids saved, hashed and dumped and a mismatch refused (MOD-SDK-011/012 follow-ups). No module runtime or deliberately different provider has been benchmarked yet; the wasm runtime remains a separate spike.
 
 ## Repository integration points inspected
 
@@ -333,3 +332,4 @@ Close each when its PR merges.
 | #978 | Hash entry scripts and content files into the resolved identity |
 | #979 | Carry the resolved-set identity on the multiplayer wire |
 | #980 | TA: Escalation content and rules (docs/ESCALATION-INTEGRATION-PLAN.md) |
+
