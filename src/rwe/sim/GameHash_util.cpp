@@ -1,5 +1,9 @@
-#include "GameHash_util.h"
+﻿#include "GameHash_util.h"
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/mod/ModRuntime.h>
+#include <rwe/sim/EconomyProvider.h>
+#include <rwe/sim/WindProvider.h>
+#include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
 
@@ -560,6 +564,14 @@ namespace rwe
             // Absent in a skirmish, and then it adds nothing, so a skirmish's
             // hashes are what they were.
             simulation.missionRules ? computeHashOf(*simulation.missionRules) : GameHash(0),
-            simulation.missionScripts ? computeHashOf(*simulation.missionScripts) : GameHash(0));
+            simulation.missionScripts ? computeHashOf(*simulation.missionScripts) : GameHash(0),
+            // MOD-08: absent in an unmodded game, and then it adds nothing,
+            // so existing hashes are unchanged.
+            simulation.modState() ? computeHashOf(simulation.modState()->hash()) : GameHash(0),
+            simulation.modRuntime() ? computeHashOf(simulation.modRuntime()->hash()) : GameHash(0),
+            simulation.economyProvider() ? computeHashOf(simulation.economyProvider()->id()) : GameHash(0),
+            simulation.windProvider() ? computeHashOf(simulation.windProvider()->id()) : GameHash(0));
     }
 }
+
+

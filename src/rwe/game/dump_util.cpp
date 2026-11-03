@@ -1,5 +1,9 @@
-#include "dump_util.h"
+﻿#include "dump_util.h"
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/mod/ModRuntime.h>
+#include <rwe/sim/EconomyProvider.h>
+#include <rwe/sim/WindProvider.h>
+#include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
 
@@ -669,6 +673,24 @@ namespace rwe
         {
             j["missionScripts"] = dumpJson(*simulation.missionScripts);
         }
+        if (const auto* state = simulation.modState())
+        {
+            j["modState"] = state->toJson();
+        }
+        if (const auto* runtime = simulation.modRuntime())
+        {
+            j["modRuntime"] = runtime->toJson();
+        }
+        if (const auto* provider = simulation.economyProvider())
+        {
+            j["economyProvider"] = provider->id();
+        }
+        if (const auto* provider = simulation.windProvider())
+        {
+            j["windProvider"] = provider->id();
+        }
         return j;
     }
 }
+
+

@@ -230,6 +230,24 @@ namespace rwe
 
     class TadScenePlayback;
 
+    /**
+     * MOD-10, docs/MODDING-SDK-FINDINGS.md MOD-SDK-013. Forward-declared so
+     * this header never sees the Lua runtime or its containers.
+     */
+    class PresentationRuntime;
+    class PlayerView;
+    struct PresentationFrameInput;
+
+    /**
+     * Deletes the presentation runtime where its definition is visible, so
+     * GameScene.cpp does not have to include the Lua/json surface. The header
+     * stays forward-declared, as the section-budget rule in CLAUDE.md asks.
+     */
+    struct PresentationRuntimeDeleter
+    {
+        void operator()(PresentationRuntime* runtime) const;
+    };
+
     class GameScene : public Scene
     {
     public:
@@ -327,6 +345,20 @@ namespace rwe
 
         std::unique_ptr<UiPanel> currentPanel;
         std::optional<std::unique_ptr<UiPanel>> nextPanel;
+
+        /**
+         * MOD-10: presentation mods, if the game's resolved set names any.
+         * Holds the Lua states and the frame's draw list; null when the game
+         * runs unmodded, which is every game that has no presentation package.
+         */
+        std::unique_ptr<PresentationRuntime, PresentationRuntimeDeleter> presentationRuntime;
+
+        /**
+         * Whether a presentation mod consumed the last mouse-down, so the
+         * matching up goes to it too rather than to the native panel and the
+         * world. A captured up is never left for the native UI to act on.
+         */
+        bool presentationMouseCaptured{false};
 
         InGameSoundsInfo sounds;
 
@@ -1610,6 +1642,14 @@ namespace rwe
         bool canSave() const;
 
         /**
+         * MOD-10 developer reload: rebuild every presentation package from the
+         * paths the launch resolved, keeping the current HUD if the new one
+         * fails to load. Returns false when there is nothing to reload or the
+         * replacement was refused.
+         */
+        bool reloadPresentationMods();
+
+        /**
          * A lockstep game with a remote peer, and a network game of either
          * kind: restart, load and (with a peer) save are not offered in one,
          * because each leaves or forks the scene for this player alone (#658).
@@ -2320,6 +2360,28 @@ namespace rwe
         void renderUi();
 
         void renderOverlay();
+
+        /**
+         * MOD-10: builds the presentation runtime from the resolved set, runs
+         * its frame hook, draws its list and routes its orders. Everything
+         * here reads the simulation through a filtered view and writes only
+         * the local command buffer.
+         */
+        void initPresentation();
+        void updatePresentation(int millisecondsElapsed);
+        void renderPresentation();
+        void routePresentationCommands();
+
+        /** A frame's scene values, beside the filtered view. */
+        PresentationFrameInput makePresentationFrameInput() const;
+
+        /** The filtered view a presentation mod is allowed to see. */
+        PlayerView makePresentationView();
+
+        bool presentationConsumesMouseDown(const MouseButtonEvent& event);
+        bool presentationConsumesMouseUp(const MouseButtonEvent& event);
+        void presentationMouseMove(const MouseMoveEvent& event);
+        bool presentationConsumesKeyDown(const SDL_KeyboardEvent& event);
 
         void renderMinimap();
 

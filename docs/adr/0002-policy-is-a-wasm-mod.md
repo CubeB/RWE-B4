@@ -8,7 +8,68 @@ policy, which runs as sandboxed WebAssembly mods behind a narrow, versioned
 ABI. TA's own policy is the bottom mod, `ta-base`, and it ships as wasm.** A
 native build of the same source is kept as a local debugging option.
 
-**Status**: proposed
+**Status**: proposed, revised 2026-11-02
+
+## Revision 2026-11-02: early Lua and incremental mechanism replacement
+
+`docs/MODDING-PLAN.md` proposes two departures from this ADR: Lua as an early
+authoring layer, and native mechanism becoming replaceable one subsystem at a
+time. This revision accepts the first and records the second as a direction
+that is not yet decided. It revises the ADR rather than superseding it, and it
+claims no shipped wasm runtime and no runtime gameplay scripting.
+
+- **D1's split still stands: mechanism stays native.** The plan proposes making
+  mechanism replaceable incrementally. This revision does not authorize that:
+  there is no provider contract, no reference finding for a moved mechanism,
+  and no evidence yet that a default provider preserves current behaviour
+  (roadmap MOD-11). If mechanism replacement is taken up, it is incremental
+  and per subsystem, and it is a further revision of this ADR.
+- **Lua source is the first author-facing layer, for pre-match definition
+  transforms.** The plan makes the authoring experience the priority: create a
+  mod from a template, edit a script, preview the result. A compiled wasm
+  toolchain is not a prerequisite for that, and the first SDK runs no script
+  during the battle. Lua therefore ships first for pre-match transforms over
+  parsed definitions (roadmap MOD-04 and MOD-05), where a script sees names and
+  a few integers on a disposable content copy and produces a change journal.
+- **The rejection of Lua in "Considered options" is not withdrawn for runtime
+  policy hooks.** That argument is about layering by patching functions at
+  runtime, which makes load order fragile. A pre-match transform patches
+  nothing: it runs in resolved order over a disposable copy, and its layering
+  comes from that order and the journal. So it does not address this layer.
+- **This is not a replacement of the eventual wasm policy ABI.** Where they
+  apply, D5's composition rules, D7's opaque-id ABI, D10's per-mod random
+  stream, D12's fault policy, D14's store and D15's set identity remain the
+  target contract for runtime scripting. A pre-match transform is a content
+  transform, not a policy hook, so it needs only the identifier, ordering and
+  identity rules it already shares with them. None of D4 to D17 is withdrawn.
+- **The first SDK is pre-match only.** One Lua state is created and closed
+  around one transform; no VM stays active in the battle. This revision claims
+  no `hook_*` export, no event, no deferred effect and no scripted AI. The
+  roadmap milestones that add those remain future work under the decisions
+  above, not consequences of this revision.
+- **The JSON author manifest is the first-SDK choice; D4 is not abandoned.**
+  The first SDK validates `rwe_mod.json` rather than D4's archive-embedded
+  `modinfo.tdf`, because that file already exists in shipped community packages
+  and the first SDK has no wasm module to place beside it. D4's concern
+  survives: a loose manifest is outside the archive fingerprint, so
+  MOD-SDK-003's resolved-set identity exists to make two peers agree on
+  composition, and it must extend to entry scripts and content before a
+  mutator ships. Reconciling the two is an open review item, not a decision
+  taken here.
+- **Determinism measures already implemented.** Pinned Lua 5.4.7; a fixed
+  string-hash seed so table traversal depends on neither the clock nor
+  addresses; unit queries and the journal sorted; instruction-count and memory
+  budgets, with host calls bounded by finite ranges; `os`, `io`, `package` and
+  `debug` never opened, and `load`, `dofile`, `loadfile` and `math.random`
+  removed. These narrow the surface; they do not by themselves make arbitrary
+  Lua deterministic.
+- **Explicit uncertainty.** `math.sin`, `cos`, `exp`, `log` and the `^`
+  operator still call the C library, whose last-bit results are not pinned
+  across toolchains. Format 1 supports `+ - * / %`, comparison and
+  `math.floor`, `abs`, `min`, `max`; nothing outside that subset carries a
+  determinism claim. No same-seed hash baseline for Lua execution has been
+  captured. This revision must not be cited as evidence that arbitrary Lua is
+  reproducible.
 
 ## Why this shape
 
@@ -476,3 +537,5 @@ entry about a migrated policy names the `ta-base` file that holds it.
 - A fidelity fix to a migrated policy is a change to `ta-base`, not to engine
   C++, and a conformance test covers `ta-base` and the engine together. That is
   what ships, so it is the right thing to test.
+- New modding infrastructure is RWE-original and recorded in
+  `docs/MODDING-SDK-FINDINGS.md`; no original-game parity is claimed for it.

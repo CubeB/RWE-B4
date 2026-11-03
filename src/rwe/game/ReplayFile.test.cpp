@@ -1,9 +1,10 @@
-#include <catch2/catch_test_macros.hpp>
+﻿#include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <rwe/game/ReplayFile.h>
+#include <rwe/mod/ModTransform.h>
 #include <rwe/pathfinding/PathfindingBackend.h>
 
 /**
@@ -101,6 +102,11 @@ namespace rwe
         computer.controller = PlayerControllerTypeComputer();
         header.players.push_back(computer);
         header.communityPatch = true;
+        auto modContent = std::make_shared<ModLaunchContent>();
+        modContent->identity = std::string(64, 'a');
+        modContent->packages.push_back(
+            {"com.example.costs", "1.0.0", std::string(64, 'b'), "com.example.costs/scripts/main.lua", "", {}, "mutator", {}, {}});
+        header.modContent = modContent;
 
         ReplayWriter(file.path, header).close();
 
@@ -119,6 +125,11 @@ namespace rwe
         REQUIRE(h.commanderDeath == CommanderDeathMode::GameContinues);
         REQUIRE(h.pathfindingBackend == PathfindingBackend::OpenAnnihilation);
         REQUIRE(h.communityPatch);
+        REQUIRE(h.modContent);
+        REQUIRE(h.modContent->identity == std::string(64, 'a'));
+        REQUIRE(h.modContent->packages.size() == 1);
+        REQUIRE(h.modContent->packages[0].id == "com.example.costs");
+        REQUIRE(h.modContent->packages[0].scriptPath.empty());
 
         // The empty slot has to stay an empty slot: a player's index is the
         // PlayerId that the recorded commands name.
@@ -509,3 +520,5 @@ namespace rwe
         }
     }
 }
+
+

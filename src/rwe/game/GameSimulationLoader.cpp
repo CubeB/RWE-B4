@@ -3,11 +3,17 @@
 #include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <fstream>
 #include <functional>
 #include <filesystem>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <random>
+#include <rwe/mod/ModAiScript.h>
+#include <rwe/mod/ModRuntime.h>
+#include <rwe/mod/ModStateStore.h>
+#include <rwe/mod/ModTransform.h>
 #include <set>
 #include <unordered_set>
 #include <rwe/LoadingScene_util.h>
@@ -369,7 +375,11 @@ namespace rwe
             return entries;
         }
 
-        GameDataMaps loadGameData(const GameLoadServices& services, const std::unordered_set<std::string>& requiredFeatures, bool communityPatch)
+        GameDataMaps loadGameData(
+        const GameLoadServices& services,
+        const std::unordered_set<std::string>& requiredFeatures,
+        bool communityPatch,
+        const ModLaunchContent* modContent)
         {
             GameDataMaps dataMaps;
 
@@ -549,6 +559,11 @@ namespace rwe
                 }
                 dataMaps.unitLoadOrder = tadUnitLoadOrder(std::move(fbiStems));
 
+                // Parse every FBI first, so a transform can read one unit
+                // while writing another. Nothing is registered or loaded
+                // until the whole stack has been applied.
+                std::vector<std::pair<TdfBlock, UnitFbi>> parsedFbis;
+                parsedFbis.reserve(fbis.size());
                 for (const auto& fbiName : fbis)
                 {
                     auto bytes = services.vfs->readFile(services.pathMapping->units + "/" + fbiName);
@@ -558,9 +573,102 @@ namespace rwe
                     }
 
                     std::string fbiString(bytes->data(), bytes->size());
-                    const auto fbiTdf = parseTdfFromString(fbiString);
+                    auto fbiTdf = parseTdfFromString(fbiString);
                     auto fbi = parseUnitFbi(fbiTdf);
+                    parsedFbis.emplace_back(std::move(fbiTdf), std::move(fbi));
+                }
 
+                // MOD-05: pre-match transforms run on the disposable parsed
+                // FBIs, before any definition or media is built. A failure
+                // refuses the launch and leaves the installed data untouched.
+                if (modContent && !modContent->packages.empty())
+                {
+                    LOG_INFO << "Applying mod set " << modContent->identity << " ("
+                             << modContent->packages.size() << " packages)";
+                    std::vector<ModUnitRecord> records;
+                    records.reserve(parsedFbis.size());
+                    for (const auto& [tdf, fbi] : parsedFbis)
+                    {
+                        (void)tdf;
+                        records.push_back({fbi.unitName,
+                            {{"BuildTime", static_cast<double>(fbi.buildTime)},
+                                {"EnergyCost", static_cast<double>(fbi.buildCostEnergy)},
+                                {"MetalCost", static_cast<double>(fbi.buildCostMetal)}}});
+                    }
+
+                    for (const auto& package : modContent->packages)
+                    {
+                        // Only mutators transform definitions here. An AI or
+                        // presentation package with an entry script belongs
+                        // to a different consumer and must not be fed to the
+                        // definition transform.
+                        const auto isMutator = package.kind.empty() || package.kind == "mutator";
+                        const auto isRuntime = std::any_of(package.features.begin(), package.features.end(),
+                            [](const std::string& feature) { return feature.rfind("runtime.", 0) == 0; });
+                        if (!isMutator || isRuntime)
+                        {
+                            continue;
+                        }
+                        if (package.scriptPath.empty())
+                        {
+                            // A save or replay records identity, not paths.
+                            // Without the resolved set there is nothing to
+                            // apply, and playing the unmodded data quietly
+                            // would diverge from the recording.
+                            throw std::runtime_error("Mod " + package.id
+                                + ": the recorded mod set has not been resolved on this machine");
+                        }
+                        std::ifstream scriptFile(package.scriptPath, std::ios::binary);
+                        if (!scriptFile)
+                        {
+                            throw std::runtime_error("Mod " + package.id + ": cannot open " + package.scriptPath);
+                        }
+                        std::string source(
+                            (std::istreambuf_iterator<char>(scriptFile)), std::istreambuf_iterator<char>());
+                        if (source.size() > 1024 * 1024)
+                        {
+                            throw std::runtime_error("Mod " + package.id + ": script is larger than 1 MiB");
+                        }
+
+                        ModTransformScript script{package.id, package.scriptName, source, package.options};
+                        auto transformed = runUnitTransform(script, records);
+                        if (!transformed.ok)
+                        {
+                            throw std::runtime_error("Mod " + package.id + ": " + transformed.error);
+                        }
+                        for (const auto& line : transformed.log)
+                        {
+                            LOG_INFO << "[" << package.id << "] " << line;
+                        }
+                        for (const auto& change : transformed.changes)
+                        {
+                            LOG_INFO << "[" << package.id << "] " << change.unit << " " << change.key << " "
+                                     << change.before << " -> " << change.after;
+                        }
+                    }
+
+                    std::map<std::string, const ModUnitRecord*> byName;
+                    for (const auto& record : records)
+                    {
+                        byName.emplace(record.name, &record);
+                    }
+                    for (auto& [tdf, fbi] : parsedFbis)
+                    {
+                        (void)tdf;
+                        const auto found = byName.find(fbi.unitName);
+                        if (found == byName.end())
+                        {
+                            continue;
+                        }
+                        const auto& values = found->second->values;
+                        fbi.buildTime = static_cast<unsigned int>(values.at("BuildTime"));
+                        fbi.buildCostEnergy = static_cast<unsigned int>(values.at("EnergyCost"));
+                        fbi.buildCostMetal = static_cast<unsigned int>(values.at("MetalCost"));
+                    }
+                }
+
+                for (auto& [fbiTdf, fbi] : parsedFbis)
+                {
                     // The model first: a unit whose model will not parse is
                     // left out whole, with a line in the log, rather than
                     // ending the launch -- and nothing of it is half-registered.
@@ -836,13 +944,61 @@ namespace rwe
             requiredFeatureNames.insert(f.second);
         }
 
-        auto dataMaps = loadGameData(services, requiredFeatureNames, gameParameters.communityPatch);
+        auto dataMaps = loadGameData(
+            services, requiredFeatureNames, gameParameters.communityPatch, gameParameters.modContent.get());
 
         // The wind speed range goes through as the map wrote it. The original
         // caps what a generator can make out of it by clamping the ratio, not
         // the speed, so clamping the speed here as well would have left a map
         // whose minimum is above the cap with an empty range to draw from.
         GameSimulation simulation(std::move(mapData.terrain), mapData.surfaceMetal, std::max(0, mapData.minWindSpeed), std::max(0, mapData.maxWindSpeed));
+
+        // MOD-08: persistent runtime packages. Their scripts run across ticks
+        // rather than once over the parsed definitions, so they get their own
+        // states and the engine-owned store. The seed comes from the resolved
+        // identity, not from simulation.rng, so adding a runtime mod does not
+        // move the simulation's own random sequence.
+        if (gameParameters.modContent && !gameParameters.modContent->packages.empty())
+        {
+            std::vector<ModRuntimePackage> runtimePackages;
+            for (const auto& package : gameParameters.modContent->packages)
+            {
+                const auto isRuntime = std::any_of(package.features.begin(), package.features.end(),
+                    [](const std::string& feature) { return feature.rfind("runtime.", 0) == 0; });
+                if (!isRuntime)
+                {
+                    continue;
+                }
+                if (package.scriptPath.empty())
+                {
+                    throw std::runtime_error("Mod " + package.id
+                        + ": the recorded runtime set has not been resolved on this machine");
+                }
+                std::ifstream scriptFile(package.scriptPath, std::ios::binary);
+                if (!scriptFile)
+                {
+                    throw std::runtime_error("Mod " + package.id + ": cannot open " + package.scriptPath);
+                }
+                std::string source((std::istreambuf_iterator<char>(scriptFile)), std::istreambuf_iterator<char>());
+                if (source.size() > 1024 * 1024)
+                {
+                    throw std::runtime_error("Mod " + package.id + ": script is larger than 1 MiB");
+                }
+                runtimePackages.push_back({package.id, package.scriptName, source, package.options});
+            }
+            if (!runtimePackages.empty())
+            {
+                std::uint32_t modSeed = 7;
+                const auto& identity = gameParameters.modContent->identity;
+                if (identity.size() >= 8)
+                {
+                    modSeed = static_cast<std::uint32_t>(std::stoul(identity.substr(0, 8), nullptr, 16));
+                }
+                simulation.setModState(std::make_unique<ModStateStore>());
+                simulation.setModRuntime(std::make_unique<ModRuntime>(
+                    std::move(runtimePackages), modSeed, *simulation.modState()));
+            }
+        }
         simulation.tidalStrength = std::max(0, mapData.tidalStrength);
         simulation.killMul = mapData.killMul;
         simulation.timeMul = mapData.timeMul;
@@ -1221,6 +1377,20 @@ namespace rwe
             request.downloadableScripts = &dataMaps.downloadableAiScripts;
             request.mission = gameParameters.mission;
             request.unitLimit = static_cast<unsigned int>(std::max(1, ota.maxUnits));
+
+            // MOD-09: resolve the seat's AI package before the controller is
+            // built. Which engine plays the seat is only known once the
+            // personality, the saved engine and the game's default are all
+            // settled, so this happens here rather than at the top of the
+            // loop. A seat that asks for lua and cannot get its script is
+            // refused; it is never quietly played by Classic.
+            if (chooseAiEngine(request.personality, request.savedEngine, request.defaultEngine) == AiEngine::Lua)
+            {
+                request.script = resolveModAiScript(
+                    gameParameters.modContent.get(),
+                    request.scriptPackageId,
+                    modAiSeedFromContent(gameParameters.modContent.get()));
+            }
 
             simulation.addAiController(aiPlayerId, createAiController(simulation, request, mapIntel, buildTree));
         }

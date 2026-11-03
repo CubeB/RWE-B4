@@ -1,4 +1,9 @@
 #include "GameSimulation.h"
+
+#include <rwe/sim/EconomyProvider.h>
+#include <rwe/sim/WindProvider.h>
+#include <rwe/mod/ModRuntime.h>
+#include <rwe/mod/ModStateStore.h>
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -274,6 +279,26 @@ namespace rwe
     // is intentionally absent (declared `=delete` in the header) because the
     // simulation has const wind-speed members.
     GameSimulation::~GameSimulation() = default;
+
+    void GameSimulation::setModState(std::unique_ptr<ModStateStore> state)
+    {
+        modState_ = std::move(state);
+    }
+
+    void GameSimulation::setModRuntime(std::unique_ptr<ModRuntime> runtime)
+    {
+        modRuntime_ = std::move(runtime);
+    }
+
+    void GameSimulation::setEconomyProvider(std::unique_ptr<EconomyProvider> provider)
+    {
+        economyProvider_ = std::move(provider);
+    }
+
+    void GameSimulation::setWindProvider(std::unique_ptr<WindProvider> provider)
+    {
+        windProvider_ = std::move(provider);
+    }
     GameSimulation::GameSimulation(GameSimulation&&) noexcept = default;
 
     void GameSimulation::attachDemoRecorder(std::unique_ptr<DemoRecorder> recorder)
@@ -2387,6 +2412,16 @@ namespace rwe
         // decide the tier under the Community Patch (#934).
         damage = (damage * (100 - 4 * damageTakenTier(veterancyRules(unitDefinition.veterancy, communityPatchMode), unit.kills))) / 100;
 
+        // MOD-08: the final-damage fold, after every native modifier and
+        // before the value is stored. Rounds the same way the transform
+        // surface does: once, half away from zero.
+        if (modRuntime_)
+        {
+            const auto adjusted = modRuntime_->adjustDamage(
+                unitId, attacker.value_or(UnitId(0)), static_cast<float>(damage), paralyzer);
+            damage = static_cast<int64_t>(std::floor(adjusted + 0.5f));
+        }
+
         damagePoints = static_cast<unsigned int>(std::max<int64_t>(0, damage));
 
         // A paralyzer hit never takes hit points off anything: 0x489DEB sends
@@ -3170,36 +3205,20 @@ namespace rwe
 
     void GameSimulation::updateWind()
     {
-        if (gameTime >= nextWindSpeedChange)
+        // MOD-11: the native arithmetic is the default provider. A replacement
+        // receives the same values and draws from the same simulation stream.
+        const WindInput input{
+            gameTime, nextWindSpeedChange, currentWindDirection, currentWindGenerationFactor,
+            currentWindVector, minWindSpeed, maxWindSpeed};
+        const NativeWindProvider native;
+        const auto state = windProvider_ ? windProvider_->update(input, rng) : native.update(input, rng);
+        nextWindSpeedChange = state.nextChange;
+        if (state.changed)
         {
-            // the wind speed will last between 5 and 14 seconds before changing
-            nextWindSpeedChange = gameTime + GameTime(randomBetween(rng, 5, 14) * SimTicksPerSecond);
-
-            // The minimum plus a draw below the span (BT-130, 0x4B6C30). The
-            // draw is a modulo of the span, so the map's maximum is never
-            // reached unless the two bounds are equal, and a span under two
-            // draws nothing at all: the routine returns zero without
-            // advancing the seed. randomBelow would draw for a span of one.
-            const int windSpan = maxWindSpeed - minWindSpeed;
-            const int currentWindSpeed = minWindSpeed + (windSpan < 2 ? 0 : static_cast<int>(randomBelow(rng, static_cast<unsigned int>(windSpan))));
-
-            // Only a wind that blows is given a direction (BT-26, 0x490C40):
-            // at speed zero no draw is made and the stale direction stays,
-            // which the wind generators' SetDirection is still told.
-            if (currentWindSpeed != 0)
-            {
-                currentWindDirection = SimAngle(static_cast<uint16_t>(randomBetween(rng, MinAngle.value, MaxAngle.value)));
-            }
-
-            // A generator gets the wind as a fraction of the speed the game
-            // considers a full gale, and no more than all of it however hard
-            // the map says the wind blows (TotalA.exe 0x490D5E).
-            currentWindGenerationFactor = rweMin(1_ss, SimScalar(currentWindSpeed) / SimScalar(MaxUtilizableWindSpeed));
-
-            // The same draw also aims the wind that pushes shells about.
-            currentWindVector = computeWindVector(currentWindDirection, currentWindSpeed);
-
-            UnitBehaviorService(this).updateWind(currentWindSpeed, currentWindDirection);
+            currentWindDirection = state.direction;
+            currentWindGenerationFactor = state.generationFactor;
+            currentWindVector = state.vector;
+            UnitBehaviorService(this).updateWind(state.speed, state.direction);
         }
     }
 
@@ -3366,6 +3385,13 @@ namespace rwe
         // later when T is a multiple of sixty. Sizes are taken on the
         // balances as the tick leaves them (ResourceSharing.h).
         runAutomaticSharing(*this);
+
+        // MOD-08: appended after every native phase, so no existing update
+        // moves. The hook sees the tick's settled state.
+        if (modRuntime_)
+        {
+            modRuntime_->onTick(gameTime.value);
+        }
 
         // Last, once every phase has left its mark on the tick: the recorder
         // reads the end-of-tick state, which is the state TA's sender would

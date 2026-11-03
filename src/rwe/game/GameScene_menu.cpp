@@ -22,6 +22,7 @@
 #include <rwe/MovieScene.h>
 #include <rwe/game/SaveFile.h>
 #include <rwe/game/save_util.h>
+#include <rwe/mod/ModTransform.h>
 #include <rwe/sim/SimulationOwnership.h>
 #include <rwe/io/gui/gui.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -267,7 +268,24 @@ namespace rwe
             return;
         }
 
+        // MOD-06: a save is only resumable under the mod set it was made
+        // with. A mismatch is refused here, where it can be explained,
+        // rather than diverging at the first transform after loading.
+        const auto mismatch = describeModSetMismatch(
+            gameParameters.modContent.get(), save->parameters.modContent.get());
+        if (!mismatch.empty())
+        {
+            printConsole("Cannot load save: " + mismatch);
+            return;
+        }
+
         auto parameters = save->parameters;
+        // The save records identity and fingerprints, never local paths.
+        // Keep this launch's resolved scripts when the sets agree.
+        if (parameters.modContent)
+        {
+            parameters.modContent = gameParameters.modContent;
+        }
         parameters.loadFromSaveFile = path.string();
         auto scene = std::make_shared<LoadingScene>(
             sceneContext,

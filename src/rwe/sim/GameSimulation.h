@@ -49,6 +49,10 @@ namespace rwe
     class DemoRecorder;
     struct MissionRules;
     struct MissionScripts;
+    class ModStateStore;
+    class ModRuntime;
+    class EconomyProvider;
+    class WindProvider;
     struct MixedOwnershipOutbox;
 
     constexpr int MaxUtilizableWindSpeed = 5000;
@@ -842,6 +846,43 @@ namespace rwe
          * steps left. Held and kept like missionRules, for the same reasons.
          */
         std::unique_ptr<MissionScripts> missionScripts;
+
+        /**
+         * MOD-08: engine-owned mod state. Null in an unmodded game, which is
+         * why the hash, save and dump contributions are zero/absent there.
+         * Held behind a unique_ptr so this widely included header never sees
+         * the store's definition.
+         */
+        std::unique_ptr<ModStateStore> modState_;
+
+        /**
+         * MOD-08: the persistent runtime scripts, when the resolved set
+         * contains runtime packages. Null in an unmodded or pre-match-only
+         * game, and then the damage hook and tick event cost nothing.
+         */
+        std::unique_ptr<ModRuntime> modRuntime_;
+
+        /**
+         * MOD-11: the selected economy settle provider. Null means the
+         * native arithmetic, so an unmodded game pays no indirection.
+         */
+        std::unique_ptr<EconomyProvider> economyProvider_;
+        std::unique_ptr<WindProvider> windProvider_;
+
+        ModStateStore* modState() { return modState_.get(); }
+        const ModStateStore* modState() const { return modState_.get(); }
+        ModRuntime* modRuntime() { return modRuntime_.get(); }
+        const ModRuntime* modRuntime() const { return modRuntime_.get(); }
+        void setModRuntime(std::unique_ptr<ModRuntime> runtime);
+        EconomyProvider* economyProvider() { return economyProvider_.get(); }
+        const EconomyProvider* economyProvider() const { return economyProvider_.get(); }
+        void setEconomyProvider(std::unique_ptr<EconomyProvider> provider);
+        WindProvider* windProvider() { return windProvider_.get(); }
+        const WindProvider* windProvider() const { return windProvider_.get(); }
+        void setWindProvider(std::unique_ptr<WindProvider> provider);
+        // Defined out of line: assigning a unique_ptr destroys the old
+        // object, and this header must never see ModStateStore's definition.
+        void setModState(std::unique_ptr<ModStateStore> state);
 
         explicit GameSimulation(MapTerrain&& terrain, unsigned char surfaceMetal, int minWindSpeed, int maxWindSpeed);
 

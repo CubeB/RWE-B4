@@ -1,9 +1,12 @@
-#include <catch2/catch_test_macros.hpp>
+﻿#include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <memory>
 #include <rwe/game/SaveFile.h>
+#include <rwe/mod/ModTransform.h>
 #include <rwe/pathfinding/PathfindingBackend.h>
 
 /**
@@ -390,4 +393,34 @@ namespace rwe
 
         REQUIRE_FALSE(readSaveFile(file.path).has_value());
     }
+
+    TEST_CASE("SaveFile's header records the mod set identity and order, not local paths", "[saveload][savefile][modsdk]")
+    {
+        TempFile file;
+        auto save = makeSaveFile();
+        auto modContent = std::make_shared<ModLaunchContent>();
+        modContent->identity = std::string(64, 'a');
+        modContent->packages.push_back(
+            {"com.example.costs", "1.0.0", std::string(64, 'b'), "com.example.costs/scripts/main.lua",
+                "C:/Users/someone/mods/costs/scripts/main.lua", {{"multiplier", 1.5}}, "mutator", {}, {}});
+        modContent->packages.push_back(
+            {"com.example.more", "2.0.0", std::string(64, 'c'), "com.example.more/scripts/main.lua", "", {}, "content", {}, {}});
+        save.parameters.modContent = modContent;
+
+        REQUIRE(writeSaveFile(file.path, save));
+        const auto loaded = readSaveFile(file.path);
+        REQUIRE(loaded.has_value());
+        REQUIRE(loaded->parameters.modContent);
+        CHECK(loaded->parameters.modContent->identity == std::string(64, 'a'));
+        REQUIRE(loaded->parameters.modContent->packages.size() == 2);
+        CHECK(loaded->parameters.modContent->packages[0].id == "com.example.costs");
+        CHECK(loaded->parameters.modContent->packages[1].id == "com.example.more");
+        CHECK(loaded->parameters.modContent->packages[0].scriptPath.empty());
+
+        std::ifstream in(file.path, std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK(text.find("C:/Users/someone") == std::string::npos);
+    }
 }
+
+

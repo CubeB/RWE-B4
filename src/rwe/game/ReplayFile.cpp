@@ -6,6 +6,7 @@
 #include <cstring>
 #include <network.pb.h>
 #include <nlohmann/json.hpp>
+#include <rwe/mod/ModTransform.h>
 #include <rwe/proto/serialization.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util.h>
@@ -34,7 +35,7 @@ namespace rwe
         // outcomes differ.
         // #934: the header carries the Community Patch ruleset. Version 7 is
         // still read, as a game with the mode off.
-        constexpr char Version = 9;
+        constexpr char Version = 10;
         constexpr char OldestVersion = 7;
 
         constexpr const char* ReplayExtension = ".rwereplay";
@@ -227,6 +228,10 @@ namespace rwe
             j["allowWatching"] = header.allowWatching;
             j["pathfinding"] = enumToName(header.pathfindingBackend, PathfindingBackendNames, "rwe");
             j["communityPatch"] = header.communityPatch;
+    if (auto mods = modLaunchContentToJson(header.modContent.get()); !mods.is_null())
+    {
+        j["mods"] = std::move(mods);
+    }
             auto& players = j["players"];
             players = nlohmann::json::array();
             for (const auto& p : header.players)
@@ -258,6 +263,10 @@ namespace rwe
             header.allowWatching = j.value("allowWatching", true);
             header.pathfindingBackend = enumFromName(j.value("pathfinding", "rwe"), PathfindingBackendNames, PathfindingBackend::RweAStar);
             header.communityPatch = j.value("communityPatch", false);
+    if (j.contains("mods"))
+    {
+        header.modContent = modLaunchContentFromJson(j.at("mods"));
+    }
             for (const auto& p : j.at("players"))
             {
                 header.players.push_back(p.is_null() ? std::optional<PlayerInfo>() : std::optional<PlayerInfo>(playerFromJson(p)));
@@ -280,6 +289,7 @@ namespace rwe
         header.allowWatching = parameters.allowWatching;
         header.pathfindingBackend = parameters.pathfindingBackend;
         header.communityPatch = parameters.communityPatch;
+    header.modContent = parameters.modContent;
         for (const auto& p : parameters.players)
         {
             header.players.push_back(p);
@@ -299,6 +309,7 @@ namespace rwe
         parameters.allowWatching = header.allowWatching;
         parameters.pathfindingBackend = header.pathfindingBackend;
         parameters.communityPatch = header.communityPatch;
+    parameters.modContent = header.modContent;
         for (std::size_t i = 0; i < parameters.players.size() && i < header.players.size(); ++i)
         {
             parameters.players[i] = header.players[i];

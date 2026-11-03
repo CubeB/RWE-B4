@@ -306,6 +306,14 @@ namespace rwe
         }
     }
 
+    TEST_CASE("ReloadPresentation is RWE's own presentation-only command", "[chat][presentation]")
+    {
+        REQUIRE(parseChatCommand("+ReloadPresentation")->kind == Kind::ReloadPresentation);
+        REQUIRE(parseChatCommand("+reloadpresentation")->kind == Kind::ReloadPresentation);
+        // It does not prefix-match.
+        REQUIRE(parseChatCommand("+Reload")->kind == Kind::Unknown);
+    }
+
     TEST_CASE("every other word is unknown, and says what it was", "[chat]")
     {
         auto c = parseChatCommand("+Contour 4");

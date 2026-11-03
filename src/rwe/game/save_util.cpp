@@ -1,4 +1,4 @@
-#include "save_util.h"
+﻿#include "save_util.h"
 
 #include "SaveJson.h"
 #include "UnitStateFieldTable.h"
@@ -13,6 +13,10 @@
 #include <rwe/ai/AiController.h>
 #include <rwe/game/GameParameters.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/mod/ModRuntime.h>
+#include <rwe/sim/EconomyProvider.h>
+#include <rwe/sim/WindProvider.h>
+#include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/SimulationOwnership.h>
@@ -715,7 +719,9 @@ namespace rwe
         // that a version 1 save may hold units made before mobile units were
         // shaded, which loadSimulationFromJson has to put right.
         // Version 3 adds counted, ordered fire state (BT-255).
-        j["version"] = 3;
+        // Version 4 adds the mod state. A game without one still writes 3,
+        // so an unmodded save keeps the format its older readers know.
+        j["version"] = sim.modState() ? 4 : 3;
 
         // The wind range is a construction-time constant; it travels with the
         // save only so the load can check it was given the right map.
@@ -754,6 +760,26 @@ namespace rwe
         if (sim.missionScripts)
         {
             j["missionScripts"] = saveMissionScripts(*sim.missionScripts);
+        }
+        if (const auto* state = sim.modState())
+        {
+            j["modState"] = state->toJson();
+        }
+        if (const auto* provider = sim.economyProvider())
+        {
+            j["economyProvider"] = provider->id();
+        }
+        if (const auto* provider = sim.windProvider())
+        {
+            j["windProvider"] = provider->id();
+        }
+        if (const auto* runtime = sim.modRuntime())
+        {
+            auto runtimeJson = runtime->toJson();
+            // The store is saved once, under modState; keep runtime metadata
+            // to disabled packages and RNG positions.
+            runtimeJson.erase("store");
+            j["modRuntime"] = std::move(runtimeJson);
         }
 
         json players = json::array();
@@ -867,7 +893,7 @@ namespace rwe
     void loadSimulationFromJson(const nlohmann::json& j, GameSimulation& sim)
     {
         auto version = j.at("version").get<int>();
-        if (version != 1 && version != 2 && version != 3)
+        if (version != 1 && version != 2 && version != 3 && version != 4)
         {
             throw std::runtime_error("unsupported save version");
         }
@@ -962,6 +988,40 @@ namespace rwe
         else
         {
             sim.missionScripts.reset();
+        }
+        if (j.contains("modState"))
+        {
+            auto state = std::make_unique<ModStateStore>();
+            state->loadJson(j.at("modState"));
+            sim.setModState(std::move(state));
+        }
+        else
+        {
+            sim.setModState(nullptr);
+        }
+        if (j.contains("economyProvider"))
+        {
+            const auto id = j.at("economyProvider").get<std::string>();
+            if (!sim.economyProvider() || sim.economyProvider()->id() != id)
+            {
+                throw std::runtime_error("save requires economy provider " + id);
+            }
+        }
+        if (j.contains("windProvider"))
+        {
+            const auto id = j.at("windProvider").get<std::string>();
+            if (!sim.windProvider() || sim.windProvider()->id() != id)
+            {
+                throw std::runtime_error("save requires wind provider " + id);
+            }
+        }
+        if (j.contains("modRuntime"))
+        {
+            if (!sim.modRuntime())
+            {
+                throw std::runtime_error("save carries mod runtime state but no runtime is resolved");
+            }
+            sim.modRuntime()->loadJson(j.at("modRuntime"));
         }
 
         // The fresh sim has the map's initial features standing. Sweep them
@@ -1234,6 +1294,8 @@ namespace rwe
         sim.unitCreationRequests.clear();
         sim.events.clear();
         sim.aiPendingCommands.clear();
+        // The load replaces the authoritative mod state with the save's own.
+        sim.setModState(nullptr);
     }
 
     void recordAiEngines(GameParameters& parameters, const GameSimulation& sim)
@@ -1256,3 +1318,5 @@ namespace rwe
         }
     }
 }
+
+

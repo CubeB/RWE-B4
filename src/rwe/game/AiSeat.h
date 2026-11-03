@@ -15,6 +15,7 @@
 namespace rwe
 {
     struct GameSimulation;
+    struct ModAiScript;
     class AbstractVirtualFileSystem;
 
     /**
@@ -55,6 +56,20 @@ namespace rwe
         std::optional<AiPersonality> personality;
         /** What a saved game recorded for the seat. */
         std::optional<AiEngine> savedEngine;
+        /**
+         * MOD-09: the AI package's stable id, when the launch path knows
+         * which one this seat wants. Empty means the first ai-kind package in
+         * resolved load order. It is a string rather than the package object
+         * so this widely included header never sees the script's definition.
+         */
+        std::string scriptPackageId;
+        /**
+         * MOD-09: the resolved AI script for a lua seat. Null for every other
+         * engine. The loader resolves it before createAiController; a lua seat
+         * whose script did not resolve is refused rather than played by
+         * Classic.
+         */
+        std::shared_ptr<const ModAiScript> script;
         /** GameParameters::aiEngine: for a seat with neither of the above. */
         AiEngine defaultEngine{AiEngine::Classic};
         /** The game's difficulty, used unless the personality names one. */
