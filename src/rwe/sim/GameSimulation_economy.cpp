@@ -1,4 +1,5 @@
 #include <rwe/sim/DemoRecorder.h>
+#include <rwe/sim/EconomyProvider.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/SimRandom.h>
@@ -259,8 +260,15 @@ namespace rwe
                     energyRequested.value,
                 };
 
-                auto metalSettlement = settleResourceAccount(metalAccount, bonus);
-                auto energySettlement = settleResourceAccount(energyAccount, bonus);
+                // MOD-11: the default provider is the same arithmetic; a
+                // replacement supplied through the subsystem contract takes
+                // the same call.
+                const auto settleAccount = [&](const ResourceAccount& account) {
+                    return economyProvider_ ? economyProvider_->settle(account, bonus)
+                                            : settleResourceAccount(account, bonus);
+                };
+                auto metalSettlement = settleAccount(metalAccount);
+                auto energySettlement = settleAccount(energyAccount);
 
                 player.metal = Metal(metalSettlement.stockpile);
                 player.energy = Energy(energySettlement.stockpile);

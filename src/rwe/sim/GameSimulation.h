@@ -51,6 +51,7 @@ namespace rwe
     struct MissionScripts;
     class ModStateStore;
     class ModRuntime;
+    class EconomyProvider;
     struct MixedOwnershipOutbox;
 
     constexpr int MaxUtilizableWindSpeed = 5000;
@@ -860,11 +861,20 @@ namespace rwe
          */
         std::unique_ptr<ModRuntime> modRuntime_;
 
+        /**
+         * MOD-11: the selected economy settle provider. Null means the
+         * native arithmetic, so an unmodded game pays no indirection.
+         */
+        std::unique_ptr<EconomyProvider> economyProvider_;
+
         ModStateStore* modState() { return modState_.get(); }
         const ModStateStore* modState() const { return modState_.get(); }
         ModRuntime* modRuntime() { return modRuntime_.get(); }
         const ModRuntime* modRuntime() const { return modRuntime_.get(); }
         void setModRuntime(std::unique_ptr<ModRuntime> runtime);
+        EconomyProvider* economyProvider() { return economyProvider_.get(); }
+        const EconomyProvider* economyProvider() const { return economyProvider_.get(); }
+        void setEconomyProvider(std::unique_ptr<EconomyProvider> provider);
         // Defined out of line: assigning a unique_ptr destroys the old
         // object, and this header must never see ModStateStore's definition.
         void setModState(std::unique_ptr<ModStateStore> state);

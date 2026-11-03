@@ -1,5 +1,6 @@
 #include "GameSimulation.h"
 
+#include <rwe/sim/EconomyProvider.h>
 #include <rwe/mod/ModRuntime.h>
 #include <rwe/mod/ModStateStore.h>
 #include <algorithm>
@@ -286,6 +287,11 @@ namespace rwe
     void GameSimulation::setModRuntime(std::unique_ptr<ModRuntime> runtime)
     {
         modRuntime_ = std::move(runtime);
+    }
+
+    void GameSimulation::setEconomyProvider(std::unique_ptr<EconomyProvider> provider)
+    {
+        economyProvider_ = std::move(provider);
     }
     GameSimulation::GameSimulation(GameSimulation&&) noexcept = default;
 
