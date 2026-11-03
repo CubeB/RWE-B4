@@ -127,19 +127,57 @@ namespace rwe
 #endif
         };
 
-        auto bindTcp = [&reuseAddress](asio::ip::tcp::acceptor& acceptor, std::uint16_t port) {
-            acceptor.open(asio::ip::tcp::v4());
-            acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(reuseAddress(port)));
-            acceptor.bind(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port));
-            acceptor.listen(asio::socket_base::max_listen_connections);
-            return acceptor.local_endpoint().port();
+        // An ephemeral bind can be refused outright, too. Port 0 draws from
+        // the dynamic range, and on the Windows CI runners that range
+        // overlaps what Hyper-V and WinNAT have reserved, so the stack's own
+        // choice comes back WSAEACCES (2026-11-03: ten loopback tests in one
+        // run, every one on a bind of port 0). Nothing is wrong with the
+        // socket, only with that number, so an ephemeral request is asked
+        // again; a fixed port is the caller's to fix and is thrown at once.
+        constexpr int ephemeralAttempts = 16;
+        auto refusedNumber = [](const asio::error_code& ec) {
+            return ec == asio::error::access_denied || ec == asio::error::address_in_use;
         };
 
-        auto bindUdp = [&reuseAddress](asio::ip::udp::socket& socket, std::uint16_t port) {
-            socket.open(asio::ip::udp::v4());
-            socket.set_option(asio::ip::udp::socket::reuse_address(reuseAddress(port)));
-            socket.bind(asio::ip::udp::endpoint(asio::ip::udp::v4(), port));
-            return socket.local_endpoint().port();
+        auto bindTcp = [&](asio::ip::tcp::acceptor& acceptor, std::uint16_t port) {
+            for (int attempt = 1;; ++attempt)
+            {
+                acceptor.open(asio::ip::tcp::v4());
+                acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(reuseAddress(port)));
+                asio::error_code ec;
+                acceptor.bind(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port), ec);
+                if (!ec)
+                {
+                    acceptor.listen(asio::socket_base::max_listen_connections);
+                    return acceptor.local_endpoint().port();
+                }
+                asio::error_code ignored;
+                acceptor.close(ignored);
+                if (port != 0 || attempt == ephemeralAttempts || !refusedNumber(ec))
+                {
+                    throw asio::system_error(ec, "bind");
+                }
+            }
+        };
+
+        auto bindUdp = [&](asio::ip::udp::socket& socket, std::uint16_t port) {
+            for (int attempt = 1;; ++attempt)
+            {
+                socket.open(asio::ip::udp::v4());
+                socket.set_option(asio::ip::udp::socket::reuse_address(reuseAddress(port)));
+                asio::error_code ec;
+                socket.bind(asio::ip::udp::endpoint(asio::ip::udp::v4(), port), ec);
+                if (!ec)
+                {
+                    return socket.local_endpoint().port();
+                }
+                asio::error_code ignored;
+                socket.close(ignored);
+                if (port != 0 || attempt == ephemeralAttempts || !refusedNumber(ec))
+                {
+                    throw asio::system_error(ec, "bind");
+                }
+            }
         };
 
         // The enum UDP socket shares the enum TCP port's number. When that

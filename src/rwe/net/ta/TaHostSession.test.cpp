@@ -41,6 +41,37 @@ namespace rwe
             out[off + 3] = static_cast<std::uint8_t>((value >> 24) & 0xFF);
         }
 
+        /**
+         * Binds to an OS-chosen port, and asks again when the stack's choice
+         * is refused: on the Windows runners the dynamic range overlaps ports
+         * Hyper-V has reserved, and that bind fails with WSAEACCES rather
+         * than in-use. The socket is reopened between attempts so each one
+         * starts clean. reuse_address is deliberately not set; see
+         * TaHostSession::start for what it means on Windows.
+         */
+        template <typename Socket, typename Endpoint>
+        void bindEphemeral(Socket& socket, const Endpoint& endpoint)
+        {
+            constexpr int attempts = 16;
+            for (int attempt = 1;; ++attempt)
+            {
+                asio::error_code ec;
+                socket.bind(endpoint, ec);
+                if (!ec)
+                {
+                    return;
+                }
+                const bool refusedNumber = ec == asio::error::access_denied || ec == asio::error::address_in_use;
+                if (attempt == attempts || !refusedNumber)
+                {
+                    throw asio::system_error(ec, "bind");
+                }
+                asio::error_code ignored;
+                socket.close(ignored);
+                socket.open(endpoint.protocol());
+            }
+        }
+
         void putAddress(std::vector<std::uint8_t>& out, std::size_t off, std::uint16_t port)
         {
             putU16Le(out, off, 2);
@@ -148,17 +179,16 @@ namespace rwe
                 // Listens on every address so the host's connection back to
                 // whichever source it saw reaches it.
                 tcpListener.open(asio::ip::tcp::v4());
-                tcpListener.set_option(asio::ip::tcp::acceptor::reuse_address(true));
-                tcpListener.bind(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 0));
+                bindEphemeral(tcpListener, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 0));
                 tcpListener.listen();
                 replyPort = tcpListener.local_endpoint().port();
 
                 udpSocket.open(asio::ip::udp::v4());
-                udpSocket.bind(asio::ip::udp::endpoint(udpSource, 0));
+                bindEphemeral(udpSocket, asio::ip::udp::endpoint(udpSource, 0));
                 udpPort = udpSocket.local_endpoint().port();
 
                 toHost.open(asio::ip::tcp::v4());
-                toHost.bind(asio::ip::tcp::endpoint(source, 0));
+                bindEphemeral(toHost, asio::ip::tcp::endpoint(source, 0));
                 toHost.connect(asio::ip::tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"), hostGameTcp));
                 hostUdpEndpoint = asio::ip::udp::endpoint(asio::ip::make_address_v4("127.0.0.1"), hostGameUdp);
 
