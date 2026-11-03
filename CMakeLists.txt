@@ -757,6 +757,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/mod/ModRuntime.h
     src/rwe/sim/EconomyProvider.cpp
     src/rwe/sim/EconomyProvider.h
+    src/rwe/sim/WindProvider.cpp
+    src/rwe/sim/WindProvider.h
     src/rwe/mod/ModAiScript.cpp
     src/rwe/mod/ModAiScript.h
     src/rwe/mod/ModAiController.cpp
@@ -1437,6 +1439,7 @@ set(TEST_FILES
     src/rwe/mod/ModStateStore.test.cpp
     src/rwe/mod/ModRuntime.test.cpp
     src/rwe/sim/EconomyProvider.test.cpp
+    src/rwe/sim/WindProvider.test.cpp
     src/rwe/mod/ModAi.test.cpp
     src/rwe/setup/ArchiveBackend.test.cpp
     src/rwe/sim/wreckcollision.test.cpp

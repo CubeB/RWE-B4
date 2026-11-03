@@ -52,6 +52,7 @@ namespace rwe
     class ModStateStore;
     class ModRuntime;
     class EconomyProvider;
+    class WindProvider;
     struct MixedOwnershipOutbox;
 
     constexpr int MaxUtilizableWindSpeed = 5000;
@@ -866,6 +867,7 @@ namespace rwe
          * native arithmetic, so an unmodded game pays no indirection.
          */
         std::unique_ptr<EconomyProvider> economyProvider_;
+        std::unique_ptr<WindProvider> windProvider_;
 
         ModStateStore* modState() { return modState_.get(); }
         const ModStateStore* modState() const { return modState_.get(); }
@@ -875,6 +877,9 @@ namespace rwe
         EconomyProvider* economyProvider() { return economyProvider_.get(); }
         const EconomyProvider* economyProvider() const { return economyProvider_.get(); }
         void setEconomyProvider(std::unique_ptr<EconomyProvider> provider);
+        WindProvider* windProvider() { return windProvider_.get(); }
+        const WindProvider* windProvider() const { return windProvider_.get(); }
+        void setWindProvider(std::unique_ptr<WindProvider> provider);
         // Defined out of line: assigning a unique_ptr destroys the old
         // object, and this header must never see ModStateStore's definition.
         void setModState(std::unique_ptr<ModStateStore> state);

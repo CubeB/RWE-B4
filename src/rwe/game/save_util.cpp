@@ -15,6 +15,7 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/mod/ModRuntime.h>
 #include <rwe/sim/EconomyProvider.h>
+#include <rwe/sim/WindProvider.h>
 #include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
@@ -768,6 +769,10 @@ namespace rwe
         {
             j["economyProvider"] = provider->id();
         }
+        if (const auto* provider = sim.windProvider())
+        {
+            j["windProvider"] = provider->id();
+        }
         if (const auto* runtime = sim.modRuntime())
         {
             auto runtimeJson = runtime->toJson();
@@ -1000,6 +1005,14 @@ namespace rwe
             if (!sim.economyProvider() || sim.economyProvider()->id() != id)
             {
                 throw std::runtime_error("save requires economy provider " + id);
+            }
+        }
+        if (j.contains("windProvider"))
+        {
+            const auto id = j.at("windProvider").get<std::string>();
+            if (!sim.windProvider() || sim.windProvider()->id() != id)
+            {
+                throw std::runtime_error("save requires wind provider " + id);
             }
         }
         if (j.contains("modRuntime"))
@@ -1305,4 +1318,5 @@ namespace rwe
         }
     }
 }
+
 

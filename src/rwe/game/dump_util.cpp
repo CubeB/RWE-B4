@@ -2,6 +2,7 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/mod/ModRuntime.h>
 #include <rwe/sim/EconomyProvider.h>
+#include <rwe/sim/WindProvider.h>
 #include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
@@ -684,7 +685,12 @@ namespace rwe
         {
             j["economyProvider"] = provider->id();
         }
+        if (const auto* provider = simulation.windProvider())
+        {
+            j["windProvider"] = provider->id();
+        }
         return j;
     }
 }
+
 
