@@ -1,8 +1,16 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { archiveExtensions, sortArchivesInLoadOrder } from "./archiveOrder";
-export { archiveExtensions, sortArchivesInLoadOrder } from "./archiveOrder";
+import {
+  archiveExtensions,
+  manifestFileName,
+  sortArchivesInLoadOrder,
+} from "./archiveOrder";
+export {
+  archiveExtensions,
+  manifestFileName,
+  sortArchivesInLoadOrder,
+} from "./archiveOrder";
 
 /**
  * Detecting, hashing and comparing the game data two players are about to play
@@ -82,12 +90,6 @@ export interface ModFingerprint {
 function isArchive(name: string): boolean {
   return archiveExtensions.includes(path.extname(name).toLowerCase());
 }
-
-/**
- * The author manifest's file name. Read exactly as `mods.ts` reads it, so a
- * mod is the same package to the launcher and to the fingerprint.
- */
-export const manifestFileName = "rwe_mod.json";
 
 /**
  * Sorts as the engine loads: by extension in the VFS's precedence order, then

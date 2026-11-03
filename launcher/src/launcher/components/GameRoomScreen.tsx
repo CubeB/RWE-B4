@@ -43,7 +43,7 @@ import {
   CanStartGameError,
 } from "../gameClient/state";
 import { assertNever, findAndMap } from "../../common/util";
-import { manifestFileName } from "../../common/archives";
+import { manifestFileName } from "../../common/archiveOrder";
 
 function GameSettingsPanel() {
   return (

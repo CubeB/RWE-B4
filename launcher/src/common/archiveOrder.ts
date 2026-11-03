@@ -21,3 +21,11 @@ export function sortArchivesInLoadOrder<T extends { name: string }>(
     return nameA === nameB ? 0 : nameA < nameB ? -1 : 1;
   });
 }
+
+/**
+ * The author manifest's file name. Read exactly as `mods.ts` reads it, so a
+ * mod is the same package to the launcher and to the fingerprint. It lives
+ * here, beside the load order, because the renderer bundle imports it and
+ * `archives.ts` pulls in Node's `fs`, `path` and `crypto`.
+ */
+export const manifestFileName = "rwe_mod.json";
