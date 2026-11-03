@@ -7,6 +7,7 @@ namespace rwe
     {
         struct DoublingProvider final : EconomyProvider
         {
+            std::string id() const override { return "test.doubling@1"; }
             SettledResourceAccount settle(const ResourceAccount& account, float incomeMultiplier) const override
             {
                 auto result = settleResourceAccount(account, incomeMultiplier);

@@ -1,4 +1,4 @@
-#include "save_util.h"
+﻿#include "save_util.h"
 
 #include "SaveJson.h"
 #include "UnitStateFieldTable.h"
@@ -14,6 +14,7 @@
 #include <rwe/game/GameParameters.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/mod/ModRuntime.h>
+#include <rwe/sim/EconomyProvider.h>
 #include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
@@ -763,6 +764,10 @@ namespace rwe
         {
             j["modState"] = state->toJson();
         }
+        if (const auto* provider = sim.economyProvider())
+        {
+            j["economyProvider"] = provider->id();
+        }
         if (const auto* runtime = sim.modRuntime())
         {
             auto runtimeJson = runtime->toJson();
@@ -988,6 +993,14 @@ namespace rwe
         else
         {
             sim.setModState(nullptr);
+        }
+        if (j.contains("economyProvider"))
+        {
+            const auto id = j.at("economyProvider").get<std::string>();
+            if (!sim.economyProvider() || sim.economyProvider()->id() != id)
+            {
+                throw std::runtime_error("save requires economy provider " + id);
+            }
         }
         if (j.contains("modRuntime"))
         {
@@ -1292,3 +1305,4 @@ namespace rwe
         }
     }
 }
+

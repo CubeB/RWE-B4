@@ -1,6 +1,7 @@
-#include "dump_util.h"
+﻿#include "dump_util.h"
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/mod/ModRuntime.h>
+#include <rwe/sim/EconomyProvider.h>
 #include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
@@ -679,6 +680,11 @@ namespace rwe
         {
             j["modRuntime"] = runtime->toJson();
         }
+        if (const auto* provider = simulation.economyProvider())
+        {
+            j["economyProvider"] = provider->id();
+        }
         return j;
     }
 }
+

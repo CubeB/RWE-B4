@@ -1,6 +1,7 @@
 #pragma once
 
 #include <rwe/sim/ResourceSettler.h>
+#include <string>
 
 namespace rwe
 {
@@ -11,6 +12,9 @@ namespace rwe
     {
     public:
         virtual ~EconomyProvider() = default;
+        // Recorded in saves and the hash, so a replacement cannot be
+        // silently swapped for the native arithmetic.
+        virtual std::string id() const = 0;
         virtual SettledResourceAccount settle(const ResourceAccount& account, float incomeMultiplier) const = 0;
     };
 
@@ -19,6 +23,7 @@ namespace rwe
     class NativeEconomyProvider final : public EconomyProvider
     {
     public:
+        std::string id() const override;
         SettledResourceAccount settle(const ResourceAccount& account, float incomeMultiplier) const override;
     };
 }
