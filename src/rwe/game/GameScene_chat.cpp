@@ -223,6 +223,21 @@ namespace rwe
             return;
         }
 
+        if (command.kind == ChatCommand::Kind::ReloadPresentation)
+        {
+            // MOD-10 developer reload. Local and presentation-only; a failed
+            // replacement leaves the running HUD in place.
+            if (reloadPresentationMods())
+            {
+                printConsole("Presentation mods reloaded", feedbackColor);
+            }
+            else
+            {
+                printConsole("Presentation reload failed or nothing to reload", feedbackColor);
+            }
+            return;
+        }
+
         if (command.kind == ChatCommand::Kind::NoShake)
         {
             // #907: UI-option bit 4. A local preference, not saved, and the
@@ -674,6 +689,7 @@ namespace rwe
             case ChatCommand::Kind::SwitchAlt:
             case ChatCommand::Kind::MakePoster:
             case ChatCommand::Kind::MakePosterUsage:
+            case ChatCommand::Kind::ReloadPresentation:
                 break;
         }
     }

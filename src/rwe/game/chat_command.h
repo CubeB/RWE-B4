@@ -104,6 +104,13 @@ namespace rwe
             MakePoster,
             /** `+MakePoster` with a form this build does not support. */
             MakePosterUsage,
+            /**
+             * `+ReloadPresentation`: rebuild the presentation mods from the
+             * files the launch resolved, keeping the current HUD if the new
+             * one fails. RWE-original and presentation-only: it never reaches
+             * the simulation or another peer.
+             */
+            ReloadPresentation,
         };
 
         Kind kind{Kind::Empty};

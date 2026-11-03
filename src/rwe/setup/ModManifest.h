@@ -167,13 +167,14 @@ namespace rwe
     {
         int apiVersion = currentModApiVersion;
         std::vector<std::string> supportedFeatures;
-        // Presentation packages are parsed but not resolvable until MOD-10
-        // provides a presentation runtime.
+        // MOD-10 supplies the presentation runtime, so a presentation package
+        // resolves like any other kind. It takes no part in the simulation.
         std::vector<ModKind> supportedKinds = {
             ModKind::Mutator,
             ModKind::Content,
             ModKind::Ai,
             ModKind::Maps,
+            ModKind::Presentation,
             ModKind::Base,
             ModKind::Assets,
         };

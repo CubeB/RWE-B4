@@ -313,6 +313,20 @@ wasm, and the tests run it as wasm; the same source can be built natively as a
 local debugging option.
 _Avoid_: vanilla mod, default mod
 
+**Player view** (`PlayerView`):
+The filtered query a presentation mod gets instead of the simulation: the
+units the viewer can see, sensor contacts without identity, explored features,
+rounds over live sight, the viewer's own stockpile and static definitions.
+Never a writable handle, never another player's state, never `rng`. MOD-10.
+_Avoid_: game view, snapshot
+
+**Presentation runtime** (`PresentationRuntime`):
+The sandboxed Lua state a presentation package runs in, outside the
+simulation: `on_frame`, input hooks, a draw list and an ordinary-command sink.
+Not saved, not hashed, not recorded, and not part of the simulation identity.
+MOD-10.
+_Avoid_: HUD runtime, UI script
+
 **Hook**:
 A named entry point a wasm mod exports, with one fixed composition rule:
 **fold** (each layer gets the one below's result as `prev`), **event** (all

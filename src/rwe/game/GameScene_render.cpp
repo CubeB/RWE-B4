@@ -586,6 +586,11 @@ namespace rwe
         renderConsole();
         renderChatBar();
 
+        // MOD-10: a presentation mod's HUD, over the native chrome and under
+        // the menu screens. It has no texture handles and no simulation
+        // reference; everything it draws came out of the filtered view.
+        renderPresentation();
+
         // The menu screens are drawn over the game view -- the original folds
         // its options out across the world rather than tucking them behind
         // it. This has to be the overlay pass: renderUi runs before the world

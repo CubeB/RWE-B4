@@ -156,6 +156,16 @@ This is a separate spike after the default-provider proof.
 
 ## Status
 
-Neither MOD-10 nor MOD-11 has implementation code yet. This document fixes the
-boundaries and the order so the work can proceed without re-reading the whole
-scene and simulation.
+MOD-11 has the first economy and wind providers (MOD-SDK-011/012).
+
+MOD-10's first slice landed 2026-11-03: `src/rwe/presentation/` holds the
+filtered `PlayerView`, the Lua `PresentationRuntime`, the draw list and the
+package resolver, and `src/rwe/game/GameScene_presentation.cpp` is the scene
+attachment. The runtime is driven from `on_frame` and the four input hooks,
+draws through the overlay, and turns `submit_*` calls into ordinary local
+commands. `+ReloadPresentation` reloads from the resolved script paths and
+keeps the last good runtime. What remains from the ordered work above is
+native panel hosting (item 4's `UiPanel` half), filtered picking (item 5),
+effects (item 6's spawn half), the camera/minimap controllers and audio policy
+(item 7), and the windowed `ui_probe`/`battle_test` acceptance run (item 10).
+MOD-SDK-013 records the boundary and the evidence.

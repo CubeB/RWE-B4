@@ -326,9 +326,17 @@ namespace rwe
             REQUIRE_FALSE(featureResult);
             CHECK(featureResult.getErr().code == ModErrorCode::UnsupportedFeature);
 
+            // MOD-10 resolves presentation packages; a host that has not
+            // enabled the kind still refuses one.
             auto presentation = manifestJson("a.presentation");
             presentation["kind"] = "presentation";
-            const auto kindResult = resolve({packageFrom(presentation)});
+            const auto presentationResult = resolve({packageFrom(presentation)});
+            REQUIRE(presentationResult);
+            CHECK(presentationResult.get().mods.size() == 1);
+
+            auto restrictedEnvironment = ModResolutionEnvironment{};
+            restrictedEnvironment.supportedKinds = {ModKind::Content};
+            const auto kindResult = resolve({packageFrom(presentation)}, {}, restrictedEnvironment);
             REQUIRE_FALSE(kindResult);
             CHECK(kindResult.getErr().code == ModErrorCode::UnsupportedKind);
 

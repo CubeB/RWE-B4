@@ -372,6 +372,11 @@ namespace rwe
         }
 
         recreateWorldRenderTextures();
+
+        // MOD-10: after the panels and the network, because a presentation
+        // package may want to know the game is live but nothing it does
+        // decides whether the game starts.
+        initPresentation();
     }
 
     float computeSoundCeiling(int soundCount)
@@ -1120,6 +1125,10 @@ namespace rwe
         // counting the outstanding orders on demand through 0x439D80 -- so
         // this does the same.
         refreshBuildGuiTotals();
+
+        // MOD-10: once a frame, after the ticks it depicts. The draw list is
+        // consumed by render(), which never runs the script again.
+        updatePresentation(millisecondsElapsed);
 
         renderReplayWindow();
         renderTadWindow();

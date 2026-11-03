@@ -609,6 +609,136 @@ RWE-original extraction, not original-game execution. The default provider is
 not yet benchmarked against `battle_test`, and no deliberately different
 provider has been installed for a full hash-oracle comparison.
 
+## MOD-SDK-013: the presentation view and runtime
+
+Status: implemented 2026-11-03 in `src/rwe/presentation/` and
+`src/rwe/game/GameScene_presentation.cpp`, with the boundary from
+`MODDING-PRESENTATION-SUBSYSTEM-MAP.md`. RWE-original: the original has no
+presentation mod surface, so there is no decompilation comparison for the API
+itself. The filters it applies are the decoded ones.
+
+### The boundary
+
+`PlayerView` is the only simulation access a presentation package gets. It
+borrows a `GameSimulation` and one `PlayerVisibility` picture for the duration
+of a call and exposes copies, never references:
+
+- `units()` and `unit(id)` return only units `canSeeUnitInVisibility` admits
+  for the viewer, which is the same predicate the world draw and the target
+  scan use. Enemy units under fog, cloak or an untreated waterline are absent.
+- `sensorContacts()` returns the radar and sonar ids that are *not* in full
+  sight, carrying an id, a position and the sonar flag and nothing else. The
+  contact has no type, owner, colour or health, matching BT-141's
+  "Unidentified object" rule.
+- `features()` returns features on ground the viewer has explored, with a
+  `visible` flag distinguishing live sight from memory.
+- `projectiles()` applies the same live-sight test the renderer applies to a
+  round (`effectIsVisibleToPlayer`'s rule).
+- `resources()` returns the viewer's own stockpile. No other player's is
+  reachable.
+- `unitDefinition(type)` returns static definition data (name, description,
+  costs, build time, health, builder/mobile flags) and nothing per-unit.
+
+Deliberately absent: the simulation object, `players`, `playerVisibility`,
+the shared `explored` grid, `losGroupBitFor`, `rng`, feature names by table
+index (only the definition's name string), and every writable handle.
+
+### The runtime
+
+`PresentationRuntime` is one bounded Lua 5.4 state per package, modelled on
+`ModRuntime` but owning no simulation store: presentation state is not hashed,
+saved or recorded. The sandbox exposes `base`, `table`, `string`, `math`,
+`utf8` and `coroutine`; `dofile`, `loadfile`, `load`, `io`, `os`,
+`math.random` and `math.randomseed` are removed. Memory is bounded by the same
+limited allocator MOD-08 uses and each callback has an instruction budget; a
+fault disables only that package.
+
+Hooks: `on_frame(dt)`, `on_mouse_down(x, y, button) -> boolean`,
+`on_mouse_up(x, y, button) -> boolean`, `on_mouse_move(x, y)` and
+`on_key_down(key) -> boolean`. An input hook returns whether it consumed the
+event; the scene delivers a consumed event to nothing else and gives it to the
+native panel and world otherwise. `on_frame` runs once a frame, after the
+ticks that frame dispatched.
+
+Drawing goes into a plain `PresentationDrawList` (rect, line, text, bar) in UI
+pixels. Nothing in it names a texture, model or renderer handle, and the scene
+draws it in `renderOverlay` between the native chrome and the menu screens.
+
+Commands are values: `submit_move`, `submit_stop` and `submit_attack` accept
+unit ids and are filtered twice -- once in the runtime against the frame's
+own visible units, and again in the scene when the commands are turned into
+ordinary `PlayerUnitCommand`s. Only the local human's own units are accepted;
+a radar contact is not a target; nothing is submitted while watching a replay
+or demo. A frame may issue at most 1024 unit commands.
+
+### Reload
+
+`+ReloadPresentation` (RWE-original, presentation-only) re-reads every
+presentation package from the path the launch resolved and builds a complete
+replacement runtime. If any package fails to parse, fault at load, or exceed
+its budget, the replacement is discarded and the running HUD keeps drawing.
+The command is parsed by `parseChatCommand` and never reaches the command
+stream or a peer.
+
+### Resolution
+
+`ModResolutionEnvironment::supportedKinds` now includes
+`ModKind::Presentation`, so a presentation package resolves and is carried in
+the existing resolved set. `resolvedPresentationPackages` skips a recorded
+package whose machine-local script path is absent (a save or replay moved
+here), because presentation is not simulation identity; a path that exists
+but cannot be read is an error at launch. Presentation bytes are therefore
+not part of the simulation identity, by design.
+
+### Evidence
+
+`[presentation]` tests cover: hidden enemies absent from both `units()` and
+`unit(id)`; a radar contact present without identity or health; unexplored
+features hidden and remembered ones marked `visible = false`; a round over
+unexplored ground hidden; the viewer's own stockpile only; the sandbox's
+absent globals; the draw list; the command sink's rejection of a hidden
+unit; input consumption; a failed reload leaving the previous HUD running;
+and the shipped `examples/mod-presentation-hud` package loading, drawing and
+reloading through the real resolver. A dedicated test computes the sync hash
+before and after a frame that reads units/resources, draws and submits a
+move, and requires it unchanged.
+
+These are RWE tests of RWE-original behaviour, not original-game execution.
+The original-game conformance of the *filters* rests on the decoded
+`canSeeUnitInVisibility` and fog predicates those tests reuse, not on a new
+decompilation reading.
+
+Executed 2026-11-03 on the MinGW64 Debug tree (`build/`, commit `278ae3c6`
+plus this change), after a clean rebuild of `librwe`, `rwe_test` and `rwe`:
+
+- `rwe_test "[presentation]"`: 27 cases, 26 passed, 1 skipped, 190
+  assertions. The skip is the existing retail-data case that needs
+  `RWE_SCENARIO_DATA`.
+- Full `rwe_test`: 2142 cases, 2137 passed, 5 skipped, 0 failed; 217023
+  assertions passed.
+- `tools/hash-oracle.sh record` then `compare`, 120 simulated seconds on
+  each of Crystal Maze and Coast To Coast at seeds 42 and 7: all four
+  3599-tick logs identical. That run uses `rwe --ai-arena`, which never
+  constructs a `GameScene` and therefore never loads a presentation package;
+  it pins the arena path around this change rather than providing a
+  mod-on/mod-off comparison. The mod-on invariant is the unit test above,
+  which hashes the simulation before and after a frame that reads units and
+  resources, draws four commands and submits a move.
+
+### Not done
+
+- Panels remain RWE's own `UiComponent`s; a presentation package draws a list
+  rather than constructing a native `UiPanel`.
+- Filtered picking, the camera and minimap controllers, and the audio policy
+  from the subsystem map are not implemented. A mod cannot move the camera,
+  ask what is under an arbitrary screen point, or replace a sound.
+- Effects spawned through the existing helpers are not exposed.
+- The engine command line still has no resolved-set launch switch (MOD-07),
+  so the example is exercised by `rwe_test` rather than by a windowed run.
+- Presentation scripts are not part of the resolved identity, which is
+  deliberate; a mismatch between peers cannot desync a game, because nothing
+  they draw reaches the simulation.
+
 ## Verification
 
 Executed 2026-11-02: `rwe_test "[modsdk]"` and the full `rwe_test` suite; the
