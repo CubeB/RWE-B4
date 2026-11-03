@@ -1,13 +1,26 @@
-import type { ArchiveInfo, ModFingerprint } from "./archives";
+import type { ArchiveInfo, ManifestInfo, ModFingerprint } from "./archives";
 import { sortArchivesInLoadOrder } from "./archiveOrder";
 
 export interface ArchiveDifference {
   archiveName: string;
   kind: "missing" | "extra" | "different";
 }
+/**
+ * The author manifest, when it is the manifest that differs.
+ *
+ * `missing` and `extra` are stated from the reference player's side, as they
+ * are for archives: `missing` is a manifest the reference has and the other
+ * player has not, `extra` is the reverse. A manifest on one side and not the
+ * other is a difference in both directions, because a legacy archive-only
+ * package and a package that declares a manifest do not resolve the same way.
+ */
+export interface ManifestDifference {
+  kind: "missing" | "extra" | "different";
+}
 export interface ModDifference {
   modName: string;
   differences: ArchiveDifference[];
+  manifest?: ManifestDifference;
 }
 export interface ModSetComparison {
   differences: ModDifference[];
@@ -57,13 +70,26 @@ export function compareArchives(
   }));
 }
 
+export function compareManifest(
+  mine: ManifestInfo | undefined,
+  theirs: ManifestInfo | undefined
+): ManifestDifference | undefined {
+  if (mine === undefined) {
+    return theirs === undefined ? undefined : { kind: "extra" };
+  }
+  if (theirs === undefined) {
+    return { kind: "missing" };
+  }
+  return mine.hash === theirs.hash ? undefined : { kind: "different" };
+}
+
 export function compareModSets(
   activeMods: string[],
   mine: ModFingerprint[],
   theirs: ModFingerprint[]
 ): ModSetComparison {
-  const mineByName = new Map(mine.map(mod => [mod.name, mod.archives]));
-  const theirsByName = new Map(theirs.map(mod => [mod.name, mod.archives]));
+  const mineByName = new Map(mine.map(mod => [mod.name, mod]));
+  const theirsByName = new Map(theirs.map(mod => [mod.name, mod]));
   const differences: ModDifference[] = [],
     unknownMods: string[] = [];
   for (const modName of activeMods) {
@@ -73,9 +99,16 @@ export function compareModSets(
       unknownMods.push(modName);
       continue;
     }
-    const modDifferences = compareArchives(a, b);
-    if (modDifferences.length)
-      differences.push({ modName, differences: modDifferences });
+    const archiveDifferences = compareArchives(a.archives, b.archives);
+    const manifest = compareManifest(a.manifest, b.manifest);
+    // Either half is enough to refuse the game: agreeing on the archives while
+    // differing on the manifest is how two peers compose differently.
+    if (archiveDifferences.length || manifest !== undefined)
+      differences.push(
+        manifest === undefined
+          ? { modName, differences: archiveDifferences }
+          : { modName, differences: archiveDifferences, manifest }
+      );
   }
   return { differences, unknownMods };
 }

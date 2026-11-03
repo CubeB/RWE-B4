@@ -43,6 +43,7 @@ import {
   CanStartGameError,
 } from "../gameClient/state";
 import { assertNever, findAndMap } from "../../common/util";
+import { manifestFileName } from "../../common/archiveOrder";
 
 function GameSettingsPanel() {
   return (
@@ -300,15 +301,18 @@ function errToString(err: CanStartGameError, game: CurrentGameState): string {
       // something is wrong. Issue #43.
       return err.playersWithWrongArchives
         .map(p => {
-          const archives = p.mods
-            .flatMap(m =>
-              m.differences.map(d => `${m.modName}/${d.archiveName}`)
-            )
+          const files = p.mods
+            .flatMap(m => [
+              ...m.differences.map(d => `${m.modName}/${d.archiveName}`),
+              ...(m.manifest === undefined
+                ? []
+                : [`${m.modName}/${manifestFileName}`]),
+            ])
             .join(", ");
           return `${playerName(
             game,
             p.playerId
-          )} has different game data: ${archives}`;
+          )} has different game data: ${files}`;
         })
         .join("; ");
     case "archives-unchecked": {

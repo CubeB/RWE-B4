@@ -1,7 +1,11 @@
 import * as crypto from "crypto";
 import * as rx from "rxjs";
 import type { Namespace, Socket } from "socket.io";
-import { ModFingerprint, checkArchiveAgreement } from "../common/archives";
+import {
+  ModFingerprint,
+  checkArchiveAgreement,
+  manifestFileName,
+} from "../common/archives";
 import { assertNever, choose, findAndMap, getAddr } from "../common/util";
 import * as protocol from "./protocol";
 import * as valid from "./validation";
@@ -928,12 +932,15 @@ export class GameServer {
     if (agreement.mismatches.length !== 0) {
       const details = agreement.mismatches
         .map(m => {
-          const archives = m.mods
-            .flatMap(x =>
-              x.differences.map(d => `${x.modName}/${d.archiveName}`)
-            )
+          const files = m.mods
+            .flatMap(x => [
+              ...x.differences.map(d => `${x.modName}/${d.archiveName}`),
+              ...(x.manifest === undefined
+                ? []
+                : [`${x.modName}/${manifestFileName}`]),
+            ])
             .join(", ");
-          return `${this.playerLabel(room, m.playerId)} has ${archives}`;
+          return `${this.playerLabel(room, m.playerId)} has ${files}`;
         })
         .join("; ");
       this.refuseStart(

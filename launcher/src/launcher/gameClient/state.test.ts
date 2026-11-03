@@ -43,6 +43,19 @@ function ta(hash: string): ModFingerprint[] {
   return [{ name: "ta", archives: [{ name: "totala1.hpi", size: 1, hash }] }];
 }
 
+/** The same archives for both players, but a different author manifest. */
+function taWithManifest(manifestHash?: string): ModFingerprint[] {
+  return [
+    {
+      name: "ta",
+      archives: [{ name: "totala1.hpi", size: 1, hash: "x" }],
+      ...(manifestHash === undefined
+        ? {}
+        : { manifest: { size: 1, hash: manifestHash } }),
+    },
+  ];
+}
+
 function errorsOf(state: CurrentGameState): CanStartGameError[] {
   const result = canStartGame(state);
   return result.result === "err" ? result.errors : [];
@@ -71,6 +84,51 @@ describe("canStartGame, on the archives everyone is about to play with", () => {
         },
       ],
     });
+  });
+
+  it("refuses to start when the archives agree but the manifest differs", () => {
+    const errors = errorsOf(
+      room([player(1, taWithManifest("m")), player(2, taWithManifest("n"))])
+    );
+    expect(errors).toContainEqual({
+      type: "archives-differ",
+      playersWithWrongArchives: [
+        {
+          playerId: 2,
+          mods: [
+            {
+              modName: "ta",
+              differences: [],
+              manifest: { kind: "different" },
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("refuses to start when one player has a manifest and the other has not", () => {
+    const errors = errorsOf(
+      room([player(1, taWithManifest("m")), player(2, taWithManifest())])
+    );
+    expect(errors).toContainEqual({
+      type: "archives-differ",
+      playersWithWrongArchives: [
+        {
+          playerId: 2,
+          mods: [
+            { modName: "ta", differences: [], manifest: { kind: "missing" } },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("does not complain when neither player's mod has a manifest", () => {
+    const errors = errorsOf(
+      room([player(1, taWithManifest()), player(2, taWithManifest())])
+    );
+    expect(errors.map(e => e.type)).not.toContain("archives-differ");
   });
 
   it("refuses to start while a player's hashes have not arrived", () => {

@@ -1,8 +1,16 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { archiveExtensions, sortArchivesInLoadOrder } from "./archiveOrder";
-export { archiveExtensions, sortArchivesInLoadOrder } from "./archiveOrder";
+import {
+  archiveExtensions,
+  manifestFileName,
+  sortArchivesInLoadOrder,
+} from "./archiveOrder";
+export {
+  archiveExtensions,
+  manifestFileName,
+  sortArchivesInLoadOrder,
+} from "./archiveOrder";
 
 /**
  * Detecting, hashing and comparing the game data two players are about to play
@@ -11,7 +19,8 @@ export { archiveExtensions, sortArchivesInLoadOrder } from "./archiveOrder";
  * The mod name alone says nothing: two players can both have a mod called "ta"
  * and have put different archives in it, and the first they will hear of it is
  * a desync, or a map one of them does not have. What has to match is the
- * bytes, so each mod is reduced to the archives in it and the SHA-256 of each.
+ * bytes, so each mod is reduced to the archives in it and the SHA-256 of each,
+ * and to its author manifest's bytes when it has one (MOD-SDK-002/MOD-SDK-003).
  *
  * Nothing here knows about Electron or about the lobby, so it runs in the
  * launcher, in the game server and in a test.
@@ -44,10 +53,38 @@ export interface ArchiveInfo {
   hash: string;
 }
 
+/**
+ * The author manifest, as it goes to the other players.
+ *
+ * Format 1 of the manifest is `rwe_mod.json` in the mod directory. Its bytes
+ * are part of what two peers must agree on: two mods whose archives are
+ * identical but whose manifests differ can resolve to different load orders,
+ * options or scripts, and agreeing on the archives alone would let that
+ * through. MOD-SDK-003 records why the raw bytes are hashed rather than the
+ * fields: an unknown key may matter to a future SDK, and re-serializing would
+ * make whitespace and key order invisible.
+ *
+ * There is no `name`: a mod has at most one manifest, and `manifestFileName`
+ * is the only file it can be.
+ */
+export interface ManifestInfo {
+  size: number;
+  /** SHA-256 of the manifest's bytes, hex. */
+  hash: string;
+}
+
 /** A mod's data, reduced to what has to match. */
 export interface ModFingerprint {
   name: string;
   archives: ArchiveInfo[];
+  /**
+   * The author manifest, or absent when the mod has none.
+   *
+   * Absent is not the same as an empty file: a legacy archive-only package and
+   * a package that declares a manifest are different content, and the
+   * comparison between players treats them as such.
+   */
+  manifest?: ManifestInfo;
 }
 
 function isArchive(name: string): boolean {
@@ -90,6 +127,32 @@ export function listArchives(modDir: string): Promise<ArchiveFile[]> {
       )
     )
     .then(sortArchivesInLoadOrder);
+}
+
+/**
+ * The mod's author manifest, if it has one. A missing mod directory or a
+ * missing manifest both mean "no manifest", which is a legacy package.
+ */
+export function listManifest(modDir: string): Promise<ArchiveFile | undefined> {
+  const filePath = path.join(modDir, manifestFileName);
+  return fs.promises
+    .stat(filePath)
+    .then(stats =>
+      stats.isFile()
+        ? {
+            name: manifestFileName,
+            path: filePath,
+            size: stats.size,
+            mtimeMs: stats.mtimeMs,
+          }
+        : undefined
+    )
+    .catch((err: NodeJS.ErrnoException) => {
+      if (err.code === "ENOENT" || err.code === "ENOTDIR") {
+        return undefined;
+      }
+      throw err;
+    });
 }
 
 /**
@@ -139,9 +202,30 @@ export function cachedHashIsValid(
 }
 
 /**
+ * The hash of one file, from the cache where it can be trusted and from the
+ * file where it cannot, leaving the cache holding what was used.
+ */
+async function cachedFileHash(
+  file: ArchiveFile,
+  cache: HashCache
+): Promise<string> {
+  const cached = cache[file.path];
+  const hash = cachedHashIsValid(cached, file)
+    ? cached.hash
+    : await hashFile(file.path);
+  cache[file.path] = { size: file.size, mtimeMs: file.mtimeMs, hash };
+  return hash;
+}
+
+/**
  * Hashes every archive in a mod, using the cache where it can and adding to it
  * where it cannot. The cache is mutated in place, so a caller that is
  * interrupted keeps whatever was finished.
+ *
+ * The author manifest is hashed the same way and by the same cache, so it is
+ * covered without a second hasher or a second cache file. A mod with no
+ * manifest gets no `manifest` key at all: its fingerprint is exactly what it
+ * was before manifests were covered.
  */
 export async function fingerprintMod(
   name: string,
@@ -152,20 +236,32 @@ export async function fingerprintMod(
   const archives: ArchiveInfo[] = [];
 
   for (const file of files) {
-    const cached = cache[file.path];
-    const hash = cachedHashIsValid(cached, file)
-      ? cached.hash
-      : await hashFile(file.path);
-    cache[file.path] = { size: file.size, mtimeMs: file.mtimeMs, hash };
-    archives.push({ name: file.name, size: file.size, hash });
+    archives.push({
+      name: file.name,
+      size: file.size,
+      hash: await cachedFileHash(file, cache),
+    });
   }
 
-  return { name, archives };
+  const manifestFile = await listManifest(modDir);
+  if (manifestFile === undefined) {
+    return { name, archives };
+  }
+
+  return {
+    name,
+    archives,
+    manifest: {
+      size: manifestFile.size,
+      hash: await cachedFileHash(manifestFile, cache),
+    },
+  };
 }
 
 export type {
   ArchiveAgreement,
   ArchiveDifference,
+  ManifestDifference,
   ModDifference,
   ModSetComparison,
   PlayerArchiveState,
@@ -173,6 +269,7 @@ export type {
 export {
   checkArchiveAgreement,
   compareArchives,
+  compareManifest,
   compareModSets,
 } from "./browserArchives";
 
@@ -185,22 +282,31 @@ export {
  * be teaching players to ignore it. Six hex digits, because this is read by a
  * human comparing it with the one next to it and not by anything that has to
  * be sure -- the refusal to start is what is sure.
+ *
+ * The manifest joins the label when the mod has one, so a label cannot say two
+ * players are alike while the refusal says they are not. A mod without a
+ * manifest contributes exactly what it always did, and its label is unchanged.
  */
 export function archiveDigest(
   activeMods: string[],
   mods: ModFingerprint[]
 ): string {
-  const byName = new Map(mods.map(m => [m.name, m.archives]));
+  const byName = new Map(mods.map(m => [m.name, m]));
   const canonical = [...activeMods]
     .sort()
     .map(modName => {
-      const archives = byName.get(modName);
-      if (archives === undefined) {
+      const mod = byName.get(modName);
+      if (mod === undefined) {
         return `${modName}:?`;
       }
-      return sortArchivesInLoadOrder(archives)
-        .map(a => `${modName}/${a.name.toLowerCase()}:${a.hash}`)
-        .join("\n");
+      return [
+        ...sortArchivesInLoadOrder(mod.archives).map(
+          a => `${modName}/${a.name.toLowerCase()}:${a.hash}`
+        ),
+        ...(mod.manifest === undefined
+          ? []
+          : [`${modName}/${manifestFileName}:${mod.manifest.hash}`]),
+      ].join("\n");
     })
     .join("\n");
 

@@ -76,6 +76,16 @@ function archives(hash: string) {
   ];
 }
 
+function archivesWithManifest(archiveHash: string, manifestHash: string) {
+  return [
+    {
+      name: "ta",
+      archives: [{ name: "totala1.hpi", size: 1, hash: archiveHash }],
+      manifest: { size: 4, hash: manifestHash },
+    },
+  ];
+}
+
 describe("GameServer against payloads a client should never send", () => {
   it("refuses a room with a billion seats rather than allocating them", () => {
     const { server } = makeServer();
@@ -140,8 +150,14 @@ describe("GameServer against payloads a client should never send", () => {
     const room = server.createRoom("x", 2)!;
     const host = connect();
     const guest = connect();
-    host.fire(protocol.Handshake, handshake(room.gameId, room.adminKey, "host", ["ta"]));
-    guest.fire(protocol.Handshake, handshake(room.gameId, undefined, "guest", ["ta"]));
+    host.fire(
+      protocol.Handshake,
+      handshake(room.gameId, room.adminKey, "host", ["ta"])
+    );
+    guest.fire(
+      protocol.Handshake,
+      handshake(room.gameId, undefined, "guest", ["ta"])
+    );
 
     host.fire(protocol.ChangeMap, { mapName: "Coast To Coast" });
     host.fire(protocol.SetActiveMods, { mods: ["ta"] });
@@ -156,6 +172,42 @@ describe("GameServer against payloads a client should never send", () => {
     expect(refusal!.payload).toEqual({
       message:
         "Cannot start: the players do not have the same game data (guest has ta/totala1.hpi). Both players must use the same mods, maps and archives.",
+    });
+  });
+
+  it("tells the room which player and manifest differ when only the manifest does", () => {
+    const { server, connect, emitted } = makeServer();
+    const room = server.createRoom("x", 2)!;
+    const host = connect();
+    const guest = connect();
+    host.fire(
+      protocol.Handshake,
+      handshake(room.gameId, room.adminKey, "host", ["ta"])
+    );
+    guest.fire(
+      protocol.Handshake,
+      handshake(room.gameId, undefined, "guest", ["ta"])
+    );
+
+    host.fire(protocol.ChangeMap, { mapName: "Coast To Coast" });
+    host.fire(protocol.SetActiveMods, { mods: ["ta"] });
+    // The same archive bytes, a different author manifest: agreeing on the
+    // archives is not enough to start.
+    host.fire(protocol.SetArchives, {
+      mods: archivesWithManifest("a".repeat(64), "c".repeat(64)),
+    });
+    guest.fire(protocol.SetArchives, {
+      mods: archivesWithManifest("a".repeat(64), "d".repeat(64)),
+    });
+    host.fire(protocol.Ready, true);
+    guest.fire(protocol.Ready, true);
+    host.fire(protocol.RequestStartGame);
+
+    const refusal = emitted.find(x => x.event === protocol.StartRefused);
+    expect(refusal).toBeDefined();
+    expect(refusal!.payload).toEqual({
+      message:
+        "Cannot start: the players do not have the same game data (guest has ta/rwe_mod.json). Both players must use the same mods, maps and archives.",
     });
   });
 
