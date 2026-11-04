@@ -242,10 +242,9 @@ namespace rwe
         ModLaunchContent content;
         content.identity = std::string(64, 'a');
         content.packages.push_back({"a.first", "1.0.0", std::string(64, 'b'), "a.first/scripts/main.lua",
-            "C:/Downloads/a/main.lua", {{"multiplier", 1.5}}, "mutator", {}, {}});
+            "C:/Downloads/a/main.lua", {{"multiplier", 1.5}}, "mutator", {}, {}, {}});
         content.packages.push_back({"b.second", "2.0.0", std::string(64, 'c'), "b.second/scripts/main.lua",
-            "C:/Downloads/b/main.lua", {}, "mutator", {}, {}});
-        content.packages[1].entrySha256 = std::string(64, 'e');
+            "C:/Downloads/b/main.lua", {}, "mutator", {}, {}, std::string(64, 'e')});
 
         const auto json = modLaunchContentToJson(&content);
         REQUIRE_FALSE(json.is_null());
@@ -275,8 +274,8 @@ namespace rwe
     {
         auto first = std::make_shared<ModLaunchContent>();
         first->identity = std::string(64, 'a');
-        first->packages.push_back({"a.first", "1.0.0", std::string(64, 'b'), "a/scripts/main.lua", "", {}, "mutator", {}, {}});
-        first->packages.push_back({"b.second", "1.0.0", std::string(64, 'c'), "b/scripts/main.lua", "", {}, "mutator", {}, {}});
+        first->packages.push_back({"a.first", "1.0.0", std::string(64, 'b'), "a/scripts/main.lua", "", {}, "mutator", {}, {}, {}});
+        first->packages.push_back({"b.second", "1.0.0", std::string(64, 'c'), "b/scripts/main.lua", "", {}, "mutator", {}, {}, {}});
 
         auto same = std::make_shared<ModLaunchContent>(*first);
         CHECK(describeModSetMismatch(first.get(), same.get()).empty());
