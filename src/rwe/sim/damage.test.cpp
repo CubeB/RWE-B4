@@ -560,4 +560,37 @@ namespace rwe
         plain.applyDamage(plainId, 100);
         REQUIRE(damageTaken(plain, plainId) == 100);
     }
+
+    TEST_CASE("per-unit mod state sees the sim's tick and goes with its unit", "[damage][modruntime]")
+    {
+        auto script = makeDamageScript();
+        GameSimulation sim(makeDamageTerrain(64, 64), 0u, 0, 0);
+        auto them = addDamagePlayer(sim, "them");
+        registerDamageModel(sim, "model");
+        sim.unitDefinitions["plain"] = makeTargetDef(1000000);
+        auto id = spawnDamageUnit(sim, "plain", them, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        sim.setModState(std::make_unique<ModStateStore>());
+        sim.setModRuntime(std::make_unique<ModRuntime>(
+            std::vector<ModRuntimePackage>{
+                {"a.mark", "a.mark/scripts/main.lua",
+                    "function hook_damage_v1(v, a, amount, paralyzer, prev) rwe.unit_set(v, 'hit', rwe.tick()) return prev end",
+                    nlohmann::json::object()}},
+            7,
+            *sim.modState()));
+
+        sim.applyDamage(id, 10);
+        REQUIRE(sim.modRuntime()->disabledPackages().empty());
+        const auto hit = sim.modState()->getUnit("a.mark", id, "hit");
+        REQUIRE(hit);
+        CHECK(hit->f32 == static_cast<float>(sim.gameTime.value));
+
+        // The slot is free once the unit is deleted, so its entries must be
+        // gone before anything else can be built in it (MOD-SDK-016).
+        sim.quietlyKillUnit(id);
+        sim.deleteDeadUnits();
+        REQUIRE_FALSE(sim.unitExists(id));
+        CHECK_FALSE(sim.modState()->getUnit("a.mark", id, "hit"));
+        CHECK(sim.modState()->entriesFor("a.mark") == 0);
+    }
 }

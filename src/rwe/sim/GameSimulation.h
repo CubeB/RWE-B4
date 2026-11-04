@@ -874,6 +874,9 @@ namespace rwe
         ModRuntime* modRuntime() { return modRuntime_.get(); }
         const ModRuntime* modRuntime() const { return modRuntime_.get(); }
         void setModRuntime(std::unique_ptr<ModRuntime> runtime);
+        // ModRuntime::bind's unit-exists check, with this simulation as the
+        // context. Static, so the runtime holds a plain function pointer.
+        static bool modRuntimeUnitExists(const void* simulation, UnitId unit);
         EconomyProvider* economyProvider() { return economyProvider_.get(); }
         const EconomyProvider* economyProvider() const { return economyProvider_.get(); }
         void setEconomyProvider(std::unique_ptr<EconomyProvider> provider);

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <fstream>
@@ -67,6 +68,18 @@ namespace rwe
         CHECK(content.packages.front().kind == "presentation");
         CHECK(content.packages.front().entrySha256.empty());
         CHECK_FALSE(content.packages.front().scriptPath.empty());
+    }
+
+    TEST_CASE("the shield example resolves as a runtime package", "[modsdk][modlaunch]")
+    {
+        const auto content = resolveModLaunchContent({exampleManifest("mod-shield-runtime")}, {});
+        REQUIRE(content.packages.size() == 1);
+        const auto& package = content.packages.front();
+        CHECK(package.id == "com.example.shield");
+        CHECK(isModSha256Hex(package.entrySha256));
+        CHECK(std::find(package.features.begin(), package.features.end(), "runtime.unit-state@1")
+            != package.features.end());
+        CHECK(package.options.at("capacity") == 200);
     }
 
     TEST_CASE("mod option selections parse JSON values and refuse malformed ones", "[modsdk][modlaunch]")

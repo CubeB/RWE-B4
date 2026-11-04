@@ -1,3 +1,4 @@
+#include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/EconomyProvider.h>
 #include <rwe/sim/GameSimulation.h>
@@ -523,6 +524,14 @@ namespace rwe
             if (taLiveSender.attached())
             {
                 taLiveSender.unitRemoved(taLiveSender.context, it->first);
+            }
+
+            // A mod's per-unit entries go with the unit, before its slot is
+            // reused later this tick; otherwise the next unit built there
+            // would inherit them (MOD-SDK-016).
+            if (modState_)
+            {
+                modState_->removeUnit(it->first);
             }
 
             it = units.erase(it);

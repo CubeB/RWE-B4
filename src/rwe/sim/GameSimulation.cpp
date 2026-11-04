@@ -290,6 +290,11 @@ namespace rwe
         modRuntime_ = std::move(runtime);
     }
 
+    bool GameSimulation::modRuntimeUnitExists(const void* simulation, UnitId unit)
+    {
+        return static_cast<const GameSimulation*>(simulation)->unitExists(unit);
+    }
+
     void GameSimulation::setEconomyProvider(std::unique_ptr<EconomyProvider> provider)
     {
         economyProvider_ = std::move(provider);
@@ -2417,6 +2422,7 @@ namespace rwe
         // surface does: once, half away from zero.
         if (modRuntime_)
         {
+            modRuntime_->bind(gameTime.value, this, &GameSimulation::modRuntimeUnitExists);
             const auto adjusted = modRuntime_->adjustDamage(
                 unitId, attacker.value_or(UnitId(0)), static_cast<float>(damage), paralyzer);
             damage = static_cast<int64_t>(std::floor(adjusted + 0.5f));
@@ -3390,6 +3396,7 @@ namespace rwe
         // moves. The hook sees the tick's settled state.
         if (modRuntime_)
         {
+            modRuntime_->bind(gameTime.value, this, &GameSimulation::modRuntimeUnitExists);
             modRuntime_->onTick(gameTime.value);
         }
 

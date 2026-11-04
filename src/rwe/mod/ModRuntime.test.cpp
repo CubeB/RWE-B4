@@ -1,4 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <rwe/mod/ModRuntime.h>
 #include <string>
 #include <vector>
@@ -160,5 +163,133 @@ namespace rwe
         });
         fixture.runtime.onTick(1);
         CHECK(fixture.runtime.disabledPackages().empty());
+    }
+
+    namespace
+    {
+        bool onlyUnitThree(const void*, UnitId unit)
+        {
+            return unit == UnitId(3);
+        }
+
+        std::string shieldExampleSource()
+        {
+            const auto path =
+                std::filesystem::path(RWE_SOURCE_DIR) / "examples" / "mod-shield-runtime" / "scripts" / "main.lua";
+            std::ifstream file(path, std::ios::binary);
+            REQUIRE(file);
+            return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        }
+
+        ModRuntimePackage shieldPackage()
+        {
+            return {"com.example.shield",
+                "com.example.shield/scripts/main.lua",
+                shieldExampleSource(),
+                nlohmann::json{{"capacity", 200}, {"regen_per_tick", 1}}};
+        }
+    }
+
+    TEST_CASE("a runtime script reads the bound tick and keeps per-unit state", "[modsdk][modruntime]")
+    {
+        Fixture fixture({package("a.unit", R"(
+            function hook_damage_v1(v, a, amount, paralyzer, prev)
+                rwe.unit_set(v, "hits", (rwe.unit_get(v, "hits") or 0) + 1)
+                return rwe.tick()
+            end
+        )")});
+
+        fixture.runtime.bind(42, nullptr, nullptr);
+        CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 1.0f, false) == 42.0f);
+        CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 1.0f, false) == 42.0f);
+        CHECK(fixture.runtime.adjustDamage(UnitId(5), UnitId(4), 1.0f, false) == 42.0f);
+        REQUIRE(fixture.runtime.disabledPackages().empty());
+
+        const auto three = fixture.store.getUnit("a.unit", UnitId(3), "hits");
+        REQUIRE(three);
+        CHECK(three->f32 == 2.0f);
+        CHECK(fixture.store.getUnit("a.unit", UnitId(5), "hits")->f32 == 1.0f);
+
+        // Entries go with their unit.
+        fixture.store.removeUnit(UnitId(3));
+        CHECK_FALSE(fixture.store.getUnit("a.unit", UnitId(3), "hits"));
+
+        // on_tick moves the tick rwe.tick() reports as well.
+        fixture.runtime.onTick(50);
+        CHECK(fixture.runtime.adjustDamage(UnitId(5), UnitId(4), 1.0f, false) == 50.0f);
+    }
+
+    TEST_CASE("unit_set refuses a unit the simulation does not have", "[modsdk][modruntime]")
+    {
+        Fixture fixture({package("a.unit", R"(
+            function hook_damage_v1(v, a, amount, paralyzer, prev)
+                rwe.unit_set(v, "seen", true)
+                return prev
+            end
+        )")});
+        fixture.runtime.bind(1, nullptr, &onlyUnitThree);
+
+        CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 7.0f, false) == 7.0f);
+        CHECK(fixture.runtime.disabledPackages().empty());
+        CHECK(fixture.store.getUnit("a.unit", UnitId(3), "seen"));
+
+        // A free id is refused: the next unit built there would inherit it.
+        CHECK(fixture.runtime.adjustDamage(UnitId(9), UnitId(4), 7.0f, false) == 7.0f);
+        REQUIRE(fixture.runtime.disabledPackages().size() == 1);
+        CHECK_FALSE(fixture.store.getUnit("a.unit", UnitId(9), "seen"));
+    }
+
+    TEST_CASE("unit_set refuses values the store cannot hold", "[modsdk][modruntime]")
+    {
+        for (const std::string value : {"{}", "0/0", "nil"})
+        {
+            INFO(value);
+            Fixture fixture({package("a.bad",
+                "function hook_damage_v1(v, a, amount, paralyzer, prev) rwe.unit_set(v, 'k', " + value
+                    + ") return prev end")});
+            CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 7.0f, false) == 7.0f);
+            CHECK(fixture.runtime.disabledPackages().size() == 1);
+        }
+    }
+
+    TEST_CASE("the shield example absorbs, regenerates and survives a save", "[modsdk][modruntime]")
+    {
+        ModStateStore store;
+        ModRuntime runtime({shieldPackage()}, 7, store);
+
+        // A fresh unit has a full 200 shield.
+        runtime.bind(10, nullptr, nullptr);
+        CHECK(runtime.adjustDamage(UnitId(3), UnitId(4), 150.0f, false) == 0.0f);
+
+        // Ten ticks later it has regenerated 10, to 60, so 40 of 100 gets through.
+        runtime.bind(20, nullptr, nullptr);
+        CHECK(runtime.adjustDamage(UnitId(3), UnitId(4), 100.0f, false) == 40.0f);
+
+        // A paralyzer hit is left alone and does not touch the shield.
+        CHECK(runtime.adjustDamage(UnitId(3), UnitId(4), 500.0f, true) == 500.0f);
+
+        // Another unit's shield is its own.
+        CHECK(runtime.adjustDamage(UnitId(5), UnitId(4), 100.0f, false) == 0.0f);
+
+        // Regeneration stops at capacity.
+        runtime.bind(10000, nullptr, nullptr);
+        CHECK(runtime.adjustDamage(UnitId(5), UnitId(4), 250.0f, false) == 50.0f);
+        REQUIRE(runtime.disabledPackages().empty());
+
+        // Save, resume into a fresh runtime, and the next hit agrees with the
+        // uninterrupted run: nothing the shield needs lived in Lua.
+        const auto saved = runtime.toJson();
+        ModStateStore resumedStore;
+        ModRuntime resumed({shieldPackage()}, 7, resumedStore);
+        resumed.loadJson(saved);
+        CHECK(resumed.hash() == runtime.hash());
+
+        runtime.bind(10030, nullptr, nullptr);
+        resumed.bind(10030, nullptr, nullptr);
+        const auto uninterrupted = runtime.adjustDamage(UnitId(5), UnitId(4), 100.0f, false);
+        const auto afterResume = resumed.adjustDamage(UnitId(5), UnitId(4), 100.0f, false);
+        CHECK(uninterrupted == 70.0f);
+        CHECK(afterResume == uninterrupted);
+        CHECK(resumed.hash() == runtime.hash());
     }
 }

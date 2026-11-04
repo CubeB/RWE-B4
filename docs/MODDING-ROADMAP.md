@@ -234,6 +234,13 @@ the metadata (MOD-SDK-009). Still open: the shield/mission example, lifecycle
 hooks, unit queries and deferred effects; reclaim, feature and remote damage
 still bypass the unit hook.
 
+Progress 2026-11-04 (#970, local branch `970-shield-example`): runtime scripts
+can keep per-unit state (`rwe.unit_get`/`rwe.unit_set`) and read the tick
+(`rwe.tick()`) behind `runtime.unit-state@1`. Per-unit entries are deleted with
+the unit, and the shipped `examples/mod-shield-runtime` survives save/resume in
+tests. Recorded in MOD-SDK-016. Still open: lifecycle hooks, unit queries,
+deferred effects, the limb-damage decision and the two-peer acceptance run.
+
 ### MOD-09: Add Lua AI through the lockstep controller path
 
 Dependencies: MOD-08. Add a per-seat script provider behind the existing

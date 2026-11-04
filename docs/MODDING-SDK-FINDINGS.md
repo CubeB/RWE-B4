@@ -870,6 +870,74 @@ and the real launch cannot resolve the same manifests differently.
   archives, manifest bytes and entry scripts (MOD-SDK-006/014), not the
   resolved identity (#979).
 
+## MOD-SDK-016: per-unit runtime state and the shield example
+
+Status: implemented 2026-11-04 on the local branch `970-shield-example`, built
+on `mod-launch-switch` (MOD-SDK-015). Issue #970, partly. RWE-original;
+inherits MOD-SDK-001's boundary, and no byte-tactics comparison applies. **Not
+yet compiled or run** when written; CI is the build.
+
+### What a runtime script can now do
+
+Behind a new feature, `runtime.unit-state@1`, which a build without it refuses
+at resolution rather than failing mid-game:
+
+- `rwe.tick()` returns the simulation tick the call runs in. A script must not
+  keep timing in Lua variables, because those are not saved: a resumed game
+  would see different values from an uninterrupted one.
+- `rwe.unit_get(unit, key)` and `rwe.unit_set(unit, key, value)` read and
+  write the package's own namespace in the store's per-unit scope
+  (MOD-SDK-008), with the same value rules as `store_set`. A non-integer or
+  out-of-range unit id, a value that is not a finite number, string or
+  boolean, and a quota overflow each raise a Lua error, and the error disables
+  the package as any other fault does.
+- `unit_set` refuses a unit the simulation does not have. A unit id is a slot
+  that `spawnNewUnits` reuses within the same tick `deleteDeadUnits` frees it,
+  so an entry written for a free id would be inherited by the next unit built
+  there.
+
+### Engine side
+
+- `deleteDeadUnits` now calls `ModStateStore::removeUnit` before erasing each
+  unit. The store has offered `removeUnit` since MOD-SDK-008, but nothing
+  called it; that was harmless only while nothing could write per-unit state.
+- `ModRuntime::bind(tick, context, unitExists)` replaces any stored reference
+  to the simulation. `GameSimulation` binds itself, with a static function
+  pointer, immediately before folding damage and before `on_tick`. A stored
+  `[this]` callback would dangle: the loader builds a simulation and
+  `GameScene` then moves it. The tick is not runtime state, because it is
+  re-bound from the simulation's own clock before every dispatch, so it needs
+  no saving.
+- The new Lua functions keep C++ objects out of scope wherever `luaL_error`
+  can be reached. Lua is built as C, so the error longjmps past C++
+  destructors. The older `store_get`/`store_set` hold a `std::string` across
+  `luaL_error`, which leaks it on that path; they are left unchanged here.
+
+### The example
+
+`examples/mod-shield-runtime` gives every unit a regenerating shield (options
+`capacity`, default 200, and `regen_per_tick`, default 1). Damage is taken
+from the shield first. Regeneration is worked out at the next hit, from the
+tick of the last one, so an unshot unit costs nothing per tick. Paralyzer hits
+pass through untouched. Everything a future hit depends on is in the store,
+which is why a saved and resumed runtime gives the same next hit as an
+uninterrupted one; `[modruntime]` checks exactly that, plus absorption,
+regeneration, capping and per-unit isolation. `[damage][modruntime]` checks,
+through the real `applyDamage`, that the hook sees the simulation's tick and
+that the unit's entries are gone after `deleteDeadUnits`.
+
+The example writes two entries per shielded unit, and the default quota is
+4096 entries per package, so about 2048 units can carry a shield at once. The
+next write past that is a quota fault, and the fault disables the package,
+the same way on every peer.
+
+### Still open for #970
+
+Lifecycle hooks (created, completed, killed); filtered unit, projectile and
+player queries; deferred effects; a decision on reclaim, feature and remote
+damage, which still bypass the unit hook; and the two-peer and
+`net-test.py` acceptance runs.
+
 ## Verification
 
 Executed 2026-11-02: `rwe_test "[modsdk]"` and the full `rwe_test` suite; the
