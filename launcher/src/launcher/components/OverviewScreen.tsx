@@ -84,6 +84,7 @@ interface OverviewScreenStateProps {
   running: boolean;
   error?: string;
   installedMods: string[];
+  modSummaries: Record<string, string>;
   activeMods: string[];
   connected: boolean;
   wizardState?: WizardState;
@@ -125,6 +126,7 @@ function OverviewScreen(props: OverviewScreenProps) {
             playerName={props.playerName}
             activeMods={props.activeMods}
             installedMods={props.installedMods}
+            modSummaries={props.modSummaries}
             launchEnabled={props.launchEnabled}
             running={props.running}
             communityPatch={props.communityPatch}
@@ -215,6 +217,11 @@ function mapStateToProps(state: State): OverviewScreenStateProps {
     connected: state.masterClient.masterServerConnectionStatus === "connected",
     wizardState: state.wizard,
     installedMods: (state.installedMods || []).map(x => x.name),
+    modSummaries: Object.fromEntries(
+      (state.installedMods || []).flatMap(x =>
+        x.summary === undefined ? [] : [[x.name, x.summary]]
+      )
+    ),
     activeMods: state.activeMods,
     hostEnabled: canHostGame(state),
     joinEnabled: canJoinSelectedGame(state),

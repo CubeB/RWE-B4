@@ -10,6 +10,7 @@ import {
 import {
   getInstalledMods,
   modArgs,
+  summaryOf,
   hasUniqueInspectionRoot,
   resourceDirectoriesForMods,
   resourceDirectoriesForSelectedRoot,
@@ -122,6 +123,11 @@ describe("launcher profile and mod selection", () => {
       found.find(mod => mod.name === "legacy")?.modManifest
     ).toBeUndefined();
     expect(modArgs(found)).toEqual({ mods: [shield?.modManifest] });
+    expect(shield?.summary).toBe("mutator 1.0.0");
+    expect(summaryOf({ kind: "mutator", version: "<b>1</b>" })).toEqual({
+      summary: "mutator",
+    });
+    expect(summaryOf(null)).toEqual({});
     expect(modArgs(found.filter(mod => mod.name === "legacy"))).toEqual({});
   });
 

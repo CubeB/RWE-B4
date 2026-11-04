@@ -36,6 +36,11 @@ export interface InstalledModResult {
    * selected package. A legacy descriptor has none and only adds its data.
    */
   modManifest?: string;
+  /**
+   * What a format-1 manifest says the package is, for the Library to show:
+   * "mutator 1.0.0", say. Display only; nothing decides on it.
+   */
+  summary?: string;
 }
 export function getInstalledMods(
   baseDir: string,
@@ -72,7 +77,9 @@ export function getInstalledMods(
           name: json?.shortname || e.name,
           path: modPath,
           resourceDirectories: json?.resourceDirectories,
-          ...(formatOne ? { modManifest: manifestPath } : {}),
+          ...(formatOne
+            ? { modManifest: manifestPath, ...summaryOf(raw) }
+            : {}),
         };
       });
 
@@ -266,6 +273,19 @@ function legacyDescriptor(value: unknown): RweModJson | undefined {
  * `id`. Whether it resolves is the engine's to say; the launcher only has to
  * know that it should hand it over.
  */
+/** `kind version` from a format-1 manifest, when both are plain strings. */
+export function summaryOf(value: unknown): { summary?: string } {
+  if (typeof value !== "object" || value === null) {
+    return {};
+  }
+  const o = value as Record<string, unknown>;
+  const parts = [o.kind, o.version].filter(
+    (part): part is string =>
+      typeof part === "string" && /^[A-Za-z0-9._-]{1,32}$/.test(part)
+  );
+  return parts.length === 0 ? {} : { summary: parts.join(" ") };
+}
+
 export function isFormatOneManifest(value: unknown): boolean {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;

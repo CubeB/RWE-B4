@@ -1171,6 +1171,12 @@ through `modArgs`, which adds no key at all for a selection of legacy
 packages, so those launch exactly as before. Load order is the engine's, from
 the manifests.
 
+The Library shows what a format-1 manifest says a package is: an active
+package's chip reads `shield · mutator 1.0.0`. The summary is the manifest's
+`kind` and `version`, each taken only if it is a short plain token, so a
+manifest cannot put markup or an essay on the home screen. It is display
+only; nothing decides on it.
+
 A format-1 package's `resourceDirectories` are not read by the launcher. The
 engine applies them from the manifest through `applyModResourceDirectories`,
 and the launcher's legacy key names (`builderGuis`) are not the manifest's
