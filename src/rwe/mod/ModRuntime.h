@@ -29,6 +29,8 @@ namespace rwe
         std::size_t memoryBudgetPerPackage = 4 * 1024 * 1024;
         std::size_t maxLogEntries = 1000;
         std::size_t maxLogLength = 1024;
+        // Across all packages, between two applications.
+        std::size_t maxPendingEffects = 10000;
     };
 
     // Whether `unit` exists in the simulation `context` points at.
@@ -60,6 +62,23 @@ namespace rwe
         const void* context = nullptr;
         ModRuntimeUnitExists unitExists = nullptr;
         ModRuntimeUnitInfo unitInfo = nullptr;
+    };
+
+    // A change a runtime script asks the simulation to make (MOD-SDK-020).
+    // Queued during a call and applied by the simulation at one fixed
+    // point, the end of the tick, in the order queued.
+    struct ModEffect
+    {
+        enum class Kind
+        {
+            // Restore hit points to a finished, living unit, capped at its
+            // maximum.
+            Heal,
+        };
+        Kind kind = Kind::Heal;
+        std::string packageId;
+        UnitId unit{0};
+        unsigned int amount = 0;
     };
 
     class ModRuntime
@@ -104,6 +123,10 @@ namespace rwe
         //   hook_damage_v1(victim, attacker, amount, paralyzer, prev) -> number
         // A fault disables that package and passes prev through unchanged.
         float adjustDamage(UnitId victim, UnitId attacker, float amount, bool paralyzer);
+
+        // The effects queued since the last call, in order, leaving the
+        // queue empty. The simulation applies them after on_tick.
+        std::vector<ModEffect> takeEffects();
 
         ModStateStore& store();
         const ModStateStore& store() const;

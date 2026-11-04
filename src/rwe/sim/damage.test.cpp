@@ -679,4 +679,47 @@ namespace rwe
             == static_cast<float>(sim.unitDefinitions.at("plain").maxHitPoints));
         CHECK(sim.modState()->getGlobal("a.look", "none")->bytes == "nil");
     }
+
+    TEST_CASE("queued heals land when the simulation applies them", "[damage][modruntime]")
+    {
+        auto script = makeDamageScript();
+        GameSimulation sim(makeDamageTerrain(64, 64), 0u, 0, 0);
+        auto them = addDamagePlayer(sim, "them");
+        registerDamageModel(sim, "model");
+        sim.unitDefinitions["plain"] = makeTargetDef(1000);
+        auto id = spawnDamageUnit(sim, "plain", them, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto other = spawnDamageUnit(sim, "plain", them, SimVector(0_ss, 0_ss, 64_ss), script);
+        const auto max = sim.unitDefinitions.at("plain").maxHitPoints;
+
+        sim.setModState(std::make_unique<ModStateStore>());
+        sim.setModRuntime(std::make_unique<ModRuntime>(
+            std::vector<ModRuntimePackage>{
+                {"a.medic", "a.medic/scripts/main.lua",
+                    "function hook_damage_v1(v, a, amount, paralyzer, prev) rwe.heal(v, 30) return prev end",
+                    nlohmann::json::object()}},
+            7,
+            *sim.modState()));
+
+        sim.applyDamage(id, 100);
+        REQUIRE(sim.modRuntime()->disabledPackages().empty());
+        // Queued, not applied: the hit lands in full first.
+        CHECK(sim.getUnitState(id).hitPoints == max - 100);
+
+        sim.applyModEffects();
+        CHECK(sim.getUnitState(id).hitPoints == max - 70);
+
+        // A heal never goes past the maximum.
+        sim.applyDamage(id, 10);
+        sim.applyModEffects();
+        CHECK(sim.getUnitState(id).hitPoints == max - 50);
+        sim.applyDamage(other, 5);
+        sim.applyModEffects();
+        CHECK(sim.getUnitState(other).hitPoints == max);
+
+        // A unit that dies before its heal lands is left dead.
+        sim.applyDamage(other, 1);
+        sim.quietlyKillUnit(other);
+        sim.applyModEffects();
+        CHECK(sim.getUnitState(other).isDead());
+    }
 }

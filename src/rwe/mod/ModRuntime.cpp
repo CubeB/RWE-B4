@@ -204,6 +204,8 @@ namespace rwe
             lua_setfield(state, -2, "unit_set");
             lua_pushcfunction(state, unitInfoFunction);
             lua_setfield(state, -2, "unit_info");
+            lua_pushcfunction(state, healFunction);
+            lua_setfield(state, -2, "heal");
             lua_newtable(state);
             if (package.spec.options.is_object())
             {
@@ -453,6 +455,41 @@ namespace rwe
             return 1;
         }
 
+        // rwe.heal(unit, amount): queue hit points for a living, finished
+        // unit. Applied at the end of the tick, capped at its maximum.
+        static int healFunction(lua_State* state)
+        {
+            auto* context = *static_cast<Context**>(lua_getextraspace(state));
+            auto* impl = context->impl;
+            UnitId unit(0);
+            if (!unitIdAt(state, 1, unit))
+            {
+                return luaL_error(state, "heal needs a unit id");
+            }
+            if (!lua_isinteger(state, 2) || lua_tointeger(state, 2) < 0
+                || lua_tointeger(state, 2) > static_cast<lua_Integer>(1000000000))
+            {
+                return luaL_error(state, "heal needs a whole amount from 0 to 1000000000");
+            }
+            if (impl->world.unitExists && !impl->world.unitExists(impl->world.context, unit))
+            {
+                return luaL_error(state, "heal: no unit %d", static_cast<int>(unit.value));
+            }
+            if (impl->effects.size() >= impl->limits.maxPendingEffects)
+            {
+                return luaL_error(state, "too many pending effects");
+            }
+            {
+                ModEffect effect;
+                effect.kind = ModEffect::Kind::Heal;
+                effect.packageId = impl->packages[context->index].spec.id;
+                effect.unit = unit;
+                effect.amount = static_cast<unsigned int>(lua_tointeger(state, 2));
+                impl->effects.push_back(std::move(effect));
+            }
+            return 0;
+        }
+
         // rwe.unit_get(unit, key) -> value or nil, from this package's
         // namespace in the per-unit scope.
         static int unitGetFunction(lua_State* state)
@@ -630,6 +667,8 @@ namespace rwe
         // clock before every dispatch, so nothing about it needs saving.
         unsigned int currentTick = 0;
         ModRuntimeWorld world;
+        // Runtime state: saved, hashed and restored with the rest.
+        std::vector<ModEffect> effects;
     };
 
     ModRuntime::ModRuntime(std::vector<ModRuntimePackage> packages, std::uint32_t seed, ModStateStore& store, ModRuntimeLimits limits)
@@ -712,6 +751,13 @@ namespace rwe
         return result;
     }
 
+    std::vector<ModEffect> ModRuntime::takeEffects()
+    {
+        std::vector<ModEffect> taken;
+        taken.swap(impl_->effects);
+        return taken;
+    }
+
     ModStateStore& ModRuntime::store() { return *impl_->store; }
     const ModStateStore& ModRuntime::store() const { return *impl_->store; }
 
@@ -747,6 +793,18 @@ namespace rwe
         }
         root["rng"] = std::move(rng);
         root["store"] = impl_->store->toJson();
+        if (!impl_->effects.empty())
+        {
+            json effects = json::array();
+            for (const auto& effect : impl_->effects)
+            {
+                effects.push_back({{"kind", "heal"},
+                    {"package", effect.packageId},
+                    {"unit", effect.unit.value},
+                    {"amount", effect.amount}});
+            }
+            root["effects"] = std::move(effects);
+        }
         return root;
     }
 
@@ -779,10 +837,33 @@ namespace rwe
                 }
             }
         }
+        std::vector<ModEffect> effects;
+        if (value.contains("effects"))
+        {
+            if (!value["effects"].is_array() || value["effects"].size() > impl_->limits.maxPendingEffects)
+            {
+                throw std::runtime_error("mod runtime: effects must be an array within the pending limit");
+            }
+            for (const auto& item : value["effects"])
+            {
+                if (!item.is_object() || item.value("kind", std::string()) != "heal"
+                    || !item.contains("unit") || !item["unit"].is_number_unsigned()
+                    || !item.contains("amount") || !item["amount"].is_number_unsigned())
+                {
+                    throw std::runtime_error("mod runtime: malformed pending effect");
+                }
+                ModEffect effect;
+                effect.packageId = item.value("package", std::string());
+                effect.unit = UnitId(item["unit"].get<unsigned int>());
+                effect.amount = item["amount"].get<unsigned int>();
+                effects.push_back(std::move(effect));
+            }
+        }
         if (value.contains("store"))
         {
             impl_->store->loadJson(value["store"]);
         }
+        impl_->effects = std::move(effects);
     }
 
     std::string ModRuntime::hash() const

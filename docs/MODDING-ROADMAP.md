@@ -241,8 +241,9 @@ the unit, and the shipped `examples/mod-shield-runtime` survives save/resume in
 tests. Recorded in MOD-SDK-016. Lifecycle events (`on_unit_created`,
 `on_unit_completed`, `on_unit_killed`) follow behind `runtime.lifecycle@1`
 (MOD-SDK-017), and `rwe.unit_info` behind `runtime.unit-query@1` (MOD-SDK-018).
-Which damage the hook folds is decided in MOD-SDK-019.
-Still open: deferred effects and the two-peer acceptance run.
+Which damage the hook folds is decided in MOD-SDK-019. Deferred effects
+start with `rwe.heal` behind `runtime.effects@1` (MOD-SDK-020).
+Still open: more effect kinds and the two-peer acceptance run.
 
 ### MOD-09: Add Lua AI through the lockstep controller path
 

@@ -320,6 +320,34 @@ namespace rwe
         }
     }
 
+    void GameSimulation::applyModEffects()
+    {
+        if (!modRuntime_)
+        {
+            return;
+        }
+        for (const auto& effect : modRuntime_->takeEffects())
+        {
+            // Checked again here, not only when queued: the unit may have
+            // died, or its slot been reused, since. A stale effect is
+            // dropped on every peer alike.
+            auto found = tryGetUnitState(effect.unit);
+            if (!found)
+            {
+                continue;
+            }
+            auto& unit = found->get();
+            const auto& definition = unitDefinitions.at(unit.unitType);
+            if (unit.isDead() || unit.isBeingBuilt(definition))
+            {
+                // A nanoframe's hit points track its build progress.
+                continue;
+            }
+            const auto room = definition.maxHitPoints > unit.hitPoints ? definition.maxHitPoints - unit.hitPoints : 0u;
+            unit.hitPoints += std::min(room, effect.amount);
+        }
+    }
+
     void GameSimulation::bindModRuntime()
     {
         modRuntime_->bind(gameTime.value, ModRuntimeWorld{this, &modRuntimeUnitExists, &modRuntimeUnitInfo});
@@ -3463,6 +3491,9 @@ namespace rwe
         {
             bindModRuntime();
             modRuntime_->onTick(gameTime.value);
+            // Everything queued this tick, by any hook, lands here, once,
+            // after every native phase and on_tick.
+            applyModEffects();
         }
 
         // Last, once every phase has left its mark on the tick: the recorder

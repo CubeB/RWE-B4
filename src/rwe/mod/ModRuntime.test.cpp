@@ -388,4 +388,58 @@ namespace rwe
         CHECK(fixture.store.getGlobal("a.look", "seen")->bytes == "nil");
         CHECK(fixture.runtime.disabledPackages().empty());
     }
+
+    TEST_CASE("heal queues an effect instead of acting at once", "[modsdk][modruntime]")
+    {
+        Fixture fixture({
+            package("a.medic", R"(
+                function on_unit_killed(unit, attacker)
+                    rwe.heal(unit, 30)
+                    rwe.heal(unit + 1, 5)
+                end
+            )"),
+            package("b.medic", "function on_unit_killed(unit, attacker) rwe.heal(unit, 7) end"),
+        });
+
+        CHECK(fixture.runtime.toJson().contains("effects") == false);
+        fixture.runtime.onUnitKilled(UnitId(3), std::nullopt);
+        REQUIRE(fixture.runtime.disabledPackages().empty());
+
+        // Pending effects are runtime state: saved, hashed and restored.
+        const auto saved = fixture.runtime.toJson();
+        REQUIRE(saved.contains("effects"));
+        ModStateStore resumedStore;
+        ModRuntime resumed({package("a.medic", "function on_tick(t) end"), package("b.medic", "function on_tick(t) end")},
+            7,
+            resumedStore);
+        resumed.loadJson(saved);
+        CHECK(resumed.hash() == fixture.runtime.hash());
+
+        const auto effects = fixture.runtime.takeEffects();
+        REQUIRE(effects.size() == 3);
+        CHECK(effects[0].packageId == "a.medic");
+        CHECK(effects[0].unit == UnitId(3));
+        CHECK(effects[0].amount == 30u);
+        CHECK(effects[1].unit == UnitId(4));
+        CHECK(effects[2].packageId == "b.medic");
+        CHECK(effects[2].amount == 7u);
+
+        // Taking them empties the queue, and the JSON is as it was.
+        CHECK(fixture.runtime.takeEffects().empty());
+        CHECK(fixture.runtime.toJson().contains("effects") == false);
+        CHECK(resumed.takeEffects().size() == 3);
+    }
+
+    TEST_CASE("heal refuses amounts and units it cannot honour", "[modsdk][modruntime]")
+    {
+        for (const std::string call : {"rwe.heal(unit, -1)", "rwe.heal(unit, 1.5)", "rwe.heal(unit, 'x')", "rwe.heal(9, 1)"})
+        {
+            INFO(call);
+            Fixture fixture({package("a.bad", "function on_unit_killed(unit, attacker) " + call + " end")});
+            fixture.runtime.bind(1, nullptr, &onlyUnitThree);
+            fixture.runtime.onUnitKilled(UnitId(3), std::nullopt);
+            CHECK(fixture.runtime.disabledPackages().size() == 1);
+            CHECK(fixture.runtime.takeEffects().empty());
+        }
+    }
 }

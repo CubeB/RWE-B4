@@ -877,6 +877,8 @@ namespace rwe
         // Binds this simulation to the runtime before a dispatch: the tick,
         // and the unit queries a script may make (ModRuntime::bind).
         void bindModRuntime();
+        // Applies the effects runtime mods queued this tick (MOD-SDK-020).
+        void applyModEffects();
         // MOD-SDK-017: unit lifecycle events for runtime mods. Each does
         // nothing without a runtime. Public because UnitBehaviorService
         // completes units on the simulation's behalf.

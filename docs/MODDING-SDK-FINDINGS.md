@@ -1047,6 +1047,44 @@ Two consequences for authors:
 - A runtime mod that wants to change reclaim, the factory cancel or the decay
   needs a new hook version. `hook_damage_v1`'s meaning does not grow.
 
+## MOD-SDK-020: deferred effects, starting with heal
+
+Status: implemented 2026-11-04 on `970-shield-example`. Issue #970, partly.
+RWE-original; no byte-tactics comparison applies. Not compiled locally; CI is
+the build.
+
+Until now a runtime script could change the simulation in one way only, by
+folding damage. Behind `runtime.effects@1` it can now ask for a change, and
+the asking is separate from the doing:
+
+- `rwe.heal(unit, amount)` queues an effect. It does not touch the unit.
+  `amount` must be a whole number from 0 to 1000000000; the unit must exist
+  when the call is made. Either refusal is a Lua error, which disables the
+  package as any other fault does.
+- `GameSimulation::applyModEffects` applies the queue once per tick, straight
+  after `on_tick`, after every native phase, in the order the effects were
+  queued: by hook call, then by load order within a call. Native phases
+  therefore never see a half-applied change, and no hook can re-enter
+  `applyDamage` or any other native path.
+- Each effect is checked again when it is applied, not only when it is
+  queued. A unit that has died, or whose slot has been reused, since then is
+  skipped, and so is a unit still under construction, whose hit points track
+  its build progress. A heal is capped at the unit's maximum.
+- The queue is runtime state. `ModRuntime::toJson` writes it under
+  `effects` when it is not empty, so it is saved, hashed and restored; an
+  empty queue leaves the JSON, and so every existing save and hash, exactly
+  as it was. Saves happen between ticks, after the queue has been applied, so
+  in a running game it is normally empty, but anything a hook queues outside
+  a tick (a unit created during load, say) survives a save as well.
+- At most `maxPendingEffects` (10000) effects may wait at once, across all
+  packages; the next is refused.
+
+Heal is the first effect because it is bounded and cannot kill, spawn or move
+anything. Effects that do those things need their own validation (resources,
+ownership, placement) and are not attempted here.
+
+Still open for #970: more effect kinds and the two-peer acceptance run.
+
 ## Verification
 
 Executed 2026-11-02: `rwe_test "[modsdk]"` and the full `rwe_test` suite; the
