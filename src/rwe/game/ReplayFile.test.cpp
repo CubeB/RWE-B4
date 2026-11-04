@@ -105,7 +105,7 @@ namespace rwe
         auto modContent = std::make_shared<ModLaunchContent>();
         modContent->identity = std::string(64, 'a');
         modContent->packages.push_back(
-            {"com.example.costs", "1.0.0", std::string(64, 'b'), "com.example.costs/scripts/main.lua", "", {}, "mutator", {}, {}});
+            {"com.example.costs", "1.0.0", std::string(64, 'b'), "com.example.costs/scripts/main.lua", "", {}, "mutator", {}, {}, {}});
         header.modContent = modContent;
 
         ReplayWriter(file.path, header).close();
