@@ -752,6 +752,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/resource_io.h
     src/rwe/rwe_time.cpp
     src/rwe/rwe_time.h
+    src/rwe/mod/ModLaunch.cpp
+    src/rwe/mod/ModLaunch.h
     src/rwe/mod/ModTransform.cpp
     src/rwe/mod/ModTransform.h
     src/rwe/mod/ModStateStore.cpp
@@ -1445,6 +1447,7 @@ set(TEST_FILES
     src/rwe/setup/PackageLibrary.test.cpp
     src/rwe/setup/ModManifest.test.cpp
     src/rwe/PathMapping.test.cpp
+    src/rwe/mod/ModLaunch.test.cpp
     src/rwe/mod/ModTransform.test.cpp
     src/rwe/mod/ModStateStore.test.cpp
     src/rwe/mod/ModRuntime.test.cpp

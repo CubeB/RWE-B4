@@ -14,6 +14,7 @@
 #include <rwe/game/ControlChannel.h>
 #include <rwe/game/PlayerColorIndex.h>
 #include <rwe/io/tdf/tdf.h>
+#include <rwe/mod/ModLaunch.h>
 #include <rwe/net/ta/TaHostGame.h>
 #include <rwe/puppet/TadDemo.h>
 #include <rwe/sim/Energy.h>
@@ -118,6 +119,10 @@ int main(int argc, char* argv[])
                       << "  --map <name>          Launch directly into a game on this map\n"
                       << "  --mission             Play --map as a mission: its [units] for the players\n"
                       << "                        in the slots they name, and its own starting resources\n"
+                      << "  --mod <rwe_mod.json>  Play with this mod package (repeatable); load order comes\n"
+                      << "                        from the manifests. With --replay or --load, the set must\n"
+                      << "                        be the one the recording names\n"
+                      << "  --mod-option <id>:<key>=<value>  Set one of a --mod package's options\n"
                       << "  --community-patch     Play under the Community Patch ruleset (a curated\n"
                       << "                        subset of TADR's rules; offline/arena only for now)\n"
                       << "  --ta-host             Host a game for a joining Total Annihilation instead of\n"
@@ -507,6 +512,28 @@ int main(int argc, char* argv[])
                         gameParameters->players[slot]->aiPersonality = personality->name;
                     }
                 }
+            }
+
+            // MOD-SDK-015: --mod resolves author manifests into the launch
+            // set, exactly as rwe_setup --preview-mods does, so a modded game
+            // can be started from the command line. With --replay or --load
+            // the recording already names its set; --mod supplies this
+            // machine's copy of it, and anything but the recorded set is
+            // refused rather than played.
+            if (!args.getMulti("mod").empty() || !args.getMulti("mod-option").empty())
+            {
+                if (!gameParameters || args.contains("tad"))
+                {
+                    throw std::runtime_error("--mod needs --map, --replay or --load");
+                }
+                if (!args.getString("record-demo", "").empty())
+                {
+                    // As with --community-patch: a TA demo is the original's
+                    // format and has nowhere to carry a mod set.
+                    throw std::runtime_error("--mod cannot be recorded into a TA demo");
+                }
+                gameParameters->modContent = rwe::applyModArguments(args.getMulti("mod"), args.getMulti("mod-option"),
+                    gameParameters->modContent, args.contains("replay") || args.contains("load"));
             }
 
             std::vector<fs::path> gameDataPaths;

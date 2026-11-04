@@ -27,6 +27,7 @@
 
 #include <rwe/io/fbi/io.h>
 #include <rwe/io/tdf/tdf.h>
+#include <rwe/mod/ModLaunch.h>
 #include <rwe/mod/ModTransform.h>
 #include <rwe/setup/TaInstall.h>
 #include <rwe/setup/PackageLibrary.h>
@@ -368,31 +369,6 @@ namespace
         return std::find(args.begin(), args.end(), name) != args.end();
     }
 
-    // Reads one author manifest. The bound matches PACKAGE-003's external
-    // metadata limit; a manifest is metadata, not content.
-    std::string readManifestText(const fs::path& path)
-    {
-        std::ifstream file(path, std::ios::binary);
-        if (!file)
-        {
-            throw std::runtime_error("Cannot open manifest " + path.string());
-        }
-        std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        if (text.size() > 1024 * 1024)
-        {
-            throw std::runtime_error("Manifest is larger than 1 MiB: " + path.string());
-        }
-        return text;
-    }
-
-    // The features this build's authoring foundation provides. A manifest
-    // that requires anything else is refused rather than half-loaded.
-    const std::vector<std::string>& supportedModFeatures()
-    {
-        static const std::vector<std::string> features = {"transform.definitions@1", "runtime.damage@1"};
-        return features;
-    }
-
     // Manifest paths after `flag`, up to the next option. Indices rather than
     // strings so the native (Unicode) arguments are used on Windows.
     std::vector<std::size_t> manifestPositions(const std::vector<std::string>& args, const std::string& flag)
@@ -419,82 +395,20 @@ namespace
 
     rwe::ModOptionSelections readOptionSelections(const std::vector<std::string>& args)
     {
-        rwe::ModOptionSelections selections;
+        std::vector<std::string> texts;
         for (std::size_t i = 0; i + 1 < args.size(); ++i)
         {
-            if (args[i] != "--option")
+            if (args[i] == "--option")
             {
-                continue;
+                texts.push_back(args[i + 1]);
             }
-            const auto& text = args[i + 1];
-            const auto colon = text.find(':');
-            const auto equals = text.find('=');
-            if (colon == std::string::npos || equals == std::string::npos || colon == 0 || colon > equals
-                || equals + 1 >= text.size())
-            {
-                throw std::runtime_error("--option must be <packageId>:<key>=<value>: " + text);
-            }
-            const auto id = text.substr(0, colon);
-            const auto key = text.substr(colon + 1, equals - colon - 1);
-            const auto raw = text.substr(equals + 1);
-            nlohmann::json value;
-            try
-            {
-                value = nlohmann::json::parse(raw);
-            }
-            catch (const std::exception&)
-            {
-                value = raw;
-            }
-            selections[id][key] = value;
         }
-        return selections;
+        return rwe::parseModOptionSelections(texts);
     }
 
     rwe::ModPackage readModPackage(const fs::path& path)
     {
-        const auto text = readManifestText(path);
-        nlohmann::json manifestValue;
-        try
-        {
-            manifestValue = nlohmann::json::parse(text);
-        }
-        catch (const std::exception& e)
-        {
-            throw std::runtime_error(path.string() + ": invalid JSON: " + e.what());
-        }
-        std::string implicitId;
-        if (!manifestValue.is_object() || !manifestValue.contains("manifestVersion"))
-        {
-            implicitId = "legacy." + rwe::sha256Hex(text).substr(0, 16);
-        }
-        auto package = rwe::modPackageFromJson(manifestValue, text, path.string(), implicitId);
-        if (!package)
-        {
-            throw std::runtime_error(package.getErr().describe());
-        }
-        // MOD-SDK-014: the entry script's bytes join the identity. The path
-        // is the manifest's own normalized relative entry, so where the
-        // package sits on disk still cannot change what is hashed.
-        const auto& entry = package.get().manifest.entry;
-        if (entry && package.get().manifest.kind != rwe::ModKind::Presentation)
-        {
-            const auto scriptPath = path.parent_path() / *entry;
-            std::ifstream scriptFile(scriptPath, std::ios::binary);
-            if (!scriptFile)
-            {
-                throw std::runtime_error(package.get().manifest.id + ": entry script " + *entry
-                    + " is missing (looked for " + scriptPath.string() + ")");
-            }
-            const std::string script(
-                (std::istreambuf_iterator<char>(scriptFile)), std::istreambuf_iterator<char>());
-            if (script.size() > 1024 * 1024)
-            {
-                throw std::runtime_error(package.get().manifest.id + ": entry script is larger than 1 MiB");
-            }
-            package.get().entrySha256 = rwe::sha256Hex(script);
-        }
-        return std::move(package.get());
+        return rwe::readModPackageFile(path);
     }
 
     std::vector<rwe::ModPackage> readModPackages(
@@ -513,64 +427,6 @@ namespace
             packages.push_back(readModPackage(nativeArguments.at(position)));
         }
         return packages;
-    }
-
-    rwe::ResolvedModSet resolvePackages(
-        const std::vector<rwe::ModPackage>& packages,
-        const rwe::ModOptionSelections& selections)
-    {
-        rwe::ModResolutionEnvironment environment;
-        environment.supportedFeatures = supportedModFeatures();
-        auto set = rwe::resolveModSet(packages, selections, environment);
-        if (!set)
-        {
-            throw std::runtime_error(set.getErr().describe());
-        }
-        return std::move(set.get());
-    }
-
-    // Turns a resolved set into the launch form: ordered packages with the
-    // script path each manifest's entry resolves to.
-    rwe::ModLaunchContent launchContentFrom(
-        const rwe::ResolvedModSet& set,
-        const std::vector<rwe::ModPackage>& packages,
-        const std::vector<fs::path>& manifestPaths)
-    {
-        rwe::ModLaunchContent content;
-        content.identity = set.identity;
-        for (const auto& mod : set.mods)
-        {
-            rwe::ModLaunchPackage launch;
-            launch.id = mod.manifest.id;
-            launch.version = mod.manifest.versionText;
-            launch.manifestSha256 = mod.manifestSha256;
-            launch.entrySha256 = mod.entrySha256;
-            launch.kind = rwe::modKindText(mod.manifest.kind);
-            launch.features = mod.manifest.features;
-            launch.resourceDirectories = mod.manifest.resourceDirectories;
-            if (mod.manifest.entry)
-            {
-                launch.scriptName = mod.manifest.id + "/" + *mod.manifest.entry;
-            }
-            for (std::size_t i = 0; i < packages.size(); ++i)
-            {
-                if (packages[i].manifest.id == mod.manifest.id)
-                {
-                    if (mod.manifest.entry)
-                    {
-                        launch.scriptPath = (manifestPaths[i].parent_path() / *mod.manifest.entry).string();
-                    }
-                    break;
-                }
-            }
-            launch.options = nlohmann::json::object();
-            for (const auto& [key, value] : mod.options)
-            {
-                launch.options[key] = value;
-            }
-            content.packages.push_back(std::move(launch));
-        }
-        return content;
     }
 }
 
@@ -679,38 +535,10 @@ int main(int argc, char* argv[])
                     packages.push_back(readModPackage(nativeArguments.at(index)));
                 }
 
-                rwe::ModOptionSelections selections;
-                for (std::size_t i = 0; i + 1 < args.size(); ++i)
-                {
-                    if (args[i] != "--option")
-                    {
-                        continue;
-                    }
-                    const auto& text = args[i + 1];
-                    const auto colon = text.find(':');
-                    const auto equals = text.find('=');
-                    if (colon == std::string::npos || equals == std::string::npos || colon == 0
-                        || colon > equals || equals + 1 >= text.size())
-                    {
-                        throw std::runtime_error("--option must be <packageId>:<key>=<value>: " + text);
-                    }
-                    const auto id = text.substr(0, colon);
-                    const auto key = text.substr(colon + 1, equals - colon - 1);
-                    const auto raw = text.substr(equals + 1);
-                    nlohmann::json optionValue;
-                    try
-                    {
-                        optionValue = nlohmann::json::parse(raw);
-                    }
-                    catch (const std::exception&)
-                    {
-                        optionValue = raw;
-                    }
-                    selections[id][key] = optionValue;
-                }
+                const auto selections = readOptionSelections(args);
 
                 rwe::ModResolutionEnvironment environment;
-                environment.supportedFeatures = supportedModFeatures();
+                environment.supportedFeatures = rwe::supportedModFeatures();
                 auto set = rwe::resolveModSet(std::move(packages), selections, environment);
                 if (!set)
                 {
@@ -731,8 +559,7 @@ int main(int argc, char* argv[])
                 {
                     manifestPaths.push_back(nativeArguments.at(position));
                 }
-                const auto set = resolvePackages(packages, readOptionSelections(args));
-                const auto content = launchContentFrom(set, packages, manifestPaths);
+                const auto content = rwe::resolveModLaunchContent(packages, manifestPaths, readOptionSelections(args));
 
                 fs::path dataPath;
                 if (auto supplied = argValue(args, "--data-path"))
@@ -772,7 +599,7 @@ int main(int argc, char* argv[])
                 }
 
                 nlohmann::json report;
-                report["identity"] = set.identity;
+                report["identity"] = content.identity;
                 report["units"] = records.size();
                 auto packageReports = nlohmann::json::array();
                 for (const auto& package : content.packages)

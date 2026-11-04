@@ -304,8 +304,9 @@ A peer on an older launcher that reports no manifest is refused when the
 active mod has one; that is deliberate.
 
 Still not implemented: the full resolved-set identity (as opposed to manifest
-bytes) on the multiplayer wire, launcher-side re-resolution of a recorded set,
-and automatic regeneration under a recorded runtime version. These must not be
+bytes) on the multiplayer wire, launcher-side re-resolution of a recorded set
+(the engine's own `--mod` does it from the command line, MOD-SDK-015), and
+automatic regeneration under a recorded runtime version. These must not be
 reported as done.
 
 ## MOD-SDK-007: the author and preview workflow
@@ -731,8 +732,9 @@ plus this change), after a clean rebuild of `librwe`, `rwe_test` and `rwe`:
   from the subsystem map are not implemented. A mod cannot move the camera,
   ask what is under an arbitrary screen point, or replace a sound.
 - Effects spawned through the existing helpers are not exposed.
-- The engine command line still has no resolved-set launch switch (MOD-07),
-  so the example is exercised by `rwe_test` rather than by a windowed run.
+- The engine command line had no resolved-set launch switch when this entry
+  was written, so the example is exercised by `rwe_test`. `--mod`
+  (MOD-SDK-015) now exists; the windowed run has not been made.
 - Presentation scripts are not part of the resolved identity, which is
   deliberate; a mismatch between peers cannot desync a game, because nothing
   they draw reaches the simulation.
@@ -810,6 +812,63 @@ while running different Lua.
 - The full resolved-set identity on the multiplayer wire (#979). The engine's
   identity now covers scripts, and the launcher's fingerprint does separately,
   but the two are not yet the same value.
+
+## MOD-SDK-015: the engine's own --mod launch switch
+
+Status: implemented 2026-11-04 on the local branch `mod-launch-switch`, built
+on `978-hash-entry-scripts` (PR #982). RWE-original; inherits MOD-SDK-001's
+boundary, and no byte-tactics comparison applies. **Not yet compiled or run**:
+the authoring machine has no C++ toolchain.
+
+Until this entry, nothing could put a resolved set into a real game.
+`GameParameters::modContent` was only set from a save, a replay or a test, so
+the windowed acceptance runs MOD-07 and MOD-10 call for had no way to start,
+and #979 had no launch-time identity to put on the wire.
+
+### The switch
+
+- `rwe --map <name> --mod <rwe_mod.json> [--mod ...] [--mod-option
+  <id>:<key>=<value> ...]` resolves the manifests and starts the game with the
+  result. Load order comes from the manifests (MOD-SDK-002), never from the
+  argument order. `ai_arena` takes the same switches, so a modded game -- a Lua
+  AI seat included -- can be measured headlessly.
+- With `--replay` or `--load`, the recording already names its set, and
+  `--mod` supplies this machine's copy of it. The locally resolved set must be
+  the recorded one (`describeModSetMismatch`), and then the recording runs
+  with this machine's script paths. A different set, or mods against a
+  recording made without any, is refused rather than played. This closes
+  MOD-SDK-006's "re-resolution of a recorded set" gap for the command line.
+  Without `--mod`, a modded recording is still refused with the existing
+  "not been resolved on this machine" message.
+- `--mod` with `--record-demo` is refused, as `--community-patch` is: a TA
+  demo is the original's format and cannot carry the set. `--mod` with
+  `--tad`, or with no game to start, is refused.
+- `ai_arena` now applies each package's `resourceDirectories` to its path
+  mapping. Before, it passed the base mapping straight to the loader, so a
+  replay of a ProTA-style package would have read the wrong roots.
+
+### One resolver
+
+`src/rwe/mod/ModLaunch.{h,cpp}` now holds what `rwe_setup.cpp` used to keep
+in its anonymous namespace: reading a manifest and hashing its entry
+(MOD-SDK-014), parsing option selections, the supported-feature list, and
+turning a resolved set into the launch form. `rwe_setup`, `rwe`, `ai_arena`
+and `LoadingScene` (resource directories) all call it, so the offline preview
+and the real launch cannot resolve the same manifests differently.
+`--resolve-mods` keeps printing the canonical resolved set; its malformed
+`--option` message now reads "a mod option must be ...".
+
+### Known limits
+
+- On Windows, `rwe`'s arguments are narrow strings, as `--data-path` already
+  is. `rwe_setup`'s PACKAGE-004 handling of Unicode paths is not reproduced
+  for `--mod`.
+- `rwe.cfg` is read by the same argument parser, so a `mod=` line there would
+  apply to every launch. That is how every other option behaves; it is noted
+  here, not guarded against.
+- The launcher does not pass `--mod` yet. A network game still compares
+  archives, manifest bytes and entry scripts (MOD-SDK-006/014), not the
+  resolved identity (#979).
 
 ## Verification
 
