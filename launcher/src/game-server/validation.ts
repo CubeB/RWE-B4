@@ -1,8 +1,10 @@
 import type {
   ArchiveInfo,
+  EntryScriptInfo,
   ManifestInfo,
   ModFingerprint,
 } from "../common/archives";
+import { isValidEntryPath } from "../common/archiveOrder";
 
 /**
  * What a lobby client sends, checked before the server keeps it or passes it
@@ -161,7 +163,30 @@ function manifestInfo(x: unknown): ManifestInfo | undefined {
   if (size === undefined || hash === undefined) {
     return undefined;
   }
-  return { size, hash };
+  if (o.entry === undefined) {
+    return { size, hash };
+  }
+  const entry = entryScriptInfo(o.entry);
+  return entry === undefined ? undefined : { size, hash, entry };
+}
+
+/** The entry script a client reports for a manifest (issue #978). */
+function entryScriptInfo(x: unknown): EntryScriptInfo | undefined {
+  if (typeof x !== "object" || x === null) {
+    return undefined;
+  }
+  const o = x as Record<string, unknown>;
+  const entryPath =
+    typeof o.path === "string" && isValidEntryPath(o.path) ? o.path : undefined;
+  const size = intInRange(o.size, 0, Number.MAX_SAFE_INTEGER);
+  const hash =
+    typeof o.hash === "string" && /^[0-9a-f]{64}$/.test(o.hash)
+      ? o.hash
+      : undefined;
+  if (entryPath === undefined || size === undefined || hash === undefined) {
+    return undefined;
+  }
+  return { path: entryPath, size, hash };
 }
 
 /** The archive and manifest fingerprints a client reports (common/archives.ts). */

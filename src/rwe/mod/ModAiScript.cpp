@@ -1,28 +1,10 @@
 #include "ModAiScript.h"
 
-#include <fstream>
-#include <iterator>
 #include <rwe/mod/ModTransform.h>
 #include <stdexcept>
 
 namespace rwe
 {
-    std::string readModAiScriptFile(const std::string& packageId, const std::string& path)
-    {
-        std::ifstream scriptFile(path, std::ios::binary);
-        if (!scriptFile)
-        {
-            throw std::runtime_error("Mod " + packageId + ": cannot open " + path);
-        }
-        std::string source(
-            (std::istreambuf_iterator<char>(scriptFile)), std::istreambuf_iterator<char>());
-        if (source.size() > 1024 * 1024)
-        {
-            throw std::runtime_error("Mod " + packageId + ": script is larger than 1 MiB");
-        }
-        return source;
-    }
-
     std::uint32_t modAiSeedFromContent(const ModLaunchContent* content)
     {
         if (content == nullptr || content->identity.size() < 8)
@@ -91,7 +73,9 @@ namespace rwe
         script->scriptName = found->scriptName;
         script->options = found->options;
         script->seed = seed;
-        script->source = readModAiScriptFile(found->id, found->scriptPath);
+        // An AI script is simulation input, so bytes the identity does not
+        // cover are refused (MOD-SDK-014).
+        script->source = readVerifiedModScript(*found);
         return script;
     }
 }

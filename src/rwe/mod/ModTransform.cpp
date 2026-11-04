@@ -4,8 +4,11 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
+#include <rwe/util/Sha256.h>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -318,6 +321,12 @@ namespace rwe
                     return "mod \"" + a.id + "\" differs: this launch has version " + a.version + " ("
                         + a.manifestSha256 + "), the recording has " + b.version + " (" + b.manifestSha256 + ")";
                 }
+                if (a.entrySha256 != b.entrySha256)
+                {
+                    return "mod \"" + a.id + "\" " + a.version + " has a different script: this launch has "
+                        + (a.entrySha256.empty() ? std::string("none") : a.entrySha256) + ", the recording has "
+                        + (b.entrySha256.empty() ? std::string("none") : b.entrySha256);
+                }
             }
         }
         return "the recorded mod set " + recordedIdentity + " is not this launch's set " + expectedIdentity;
@@ -336,6 +345,7 @@ namespace rwe
                 {"id", package.id},
                 {"version", package.version},
                 {"manifestSha256", package.manifestSha256},
+                {"entrySha256", package.entrySha256},
                 {"scriptName", package.scriptName},
                 {"kind", package.kind},
                 {"features", package.features},
@@ -378,6 +388,10 @@ namespace rwe
                 package.id = item.value("id", std::string());
                 package.version = item.value("version", std::string());
                 package.manifestSha256 = item.value("manifestSha256", std::string());
+                // Absent in a record written before MOD-SDK-014; such a record
+                // also carries a format-1 identity, which no current launch
+                // reproduces, so it is refused by identity, not by this field.
+                package.entrySha256 = item.value("entrySha256", std::string());
                 package.scriptName = item.value("scriptName", std::string());
                 package.kind = item.value("kind", std::string());
                 if (item.contains("features"))
@@ -393,6 +407,34 @@ namespace rwe
             }
         }
         return content;
+    }
+
+    std::string readVerifiedModScript(const ModLaunchPackage& package)
+    {
+        constexpr std::size_t maxScriptBytes = 1024 * 1024;
+        if (package.entrySha256.empty())
+        {
+            throw std::runtime_error("Mod " + package.id
+                + ": the resolved set carries no script hash; resolve the set again with this build");
+        }
+        std::ifstream scriptFile(package.scriptPath, std::ios::binary);
+        if (!scriptFile)
+        {
+            throw std::runtime_error("Mod " + package.id + ": cannot open " + package.scriptPath);
+        }
+        std::string source((std::istreambuf_iterator<char>(scriptFile)), std::istreambuf_iterator<char>());
+        if (source.size() > maxScriptBytes)
+        {
+            throw std::runtime_error("Mod " + package.id + ": script is larger than 1 MiB");
+        }
+        const auto actual = sha256Hex(source);
+        if (actual != package.entrySha256)
+        {
+            throw std::runtime_error("Mod " + package.id + ": " + package.scriptName
+                + " changed after the mod set was resolved (expected " + package.entrySha256 + ", found "
+                + actual + "); resolve the set again");
+        }
+        return source;
     }
 
     bool isSupportedTransformKey(const std::string& key)

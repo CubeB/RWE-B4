@@ -474,6 +474,97 @@ namespace rwe
         CHECK(empty.get().mods.empty());
         CHECK(empty.get().identity.size() == 64);
         CHECK(canonicalJson(resolvedModSetJson(empty.get()))
-            == "{\"api\":1,\"format\":\"rwe.resolved-mods\",\"formatVersion\":1,\"packages\":[]}");
+            == "{\"api\":1,\"format\":\"rwe.resolved-mods\",\"formatVersion\":2,\"packages\":[]}");
+    }
+
+    TEST_CASE("the entry script's bytes are part of the identity", "[setup][modsdk]")
+    {
+        // MOD-SDK-014, issue #978: editing a script without touching
+        // rwe_mod.json must change the identity.
+        auto value = manifestJson("a.mutator");
+        value["kind"] = "mutator";
+        value["entry"] = "scripts/main.lua";
+
+        auto package = packageFrom(value);
+
+        SECTION("a package with an entry must carry the script's hash")
+        {
+            const auto result = resolve({package});
+            REQUIRE_FALSE(result);
+            CHECK(result.getErr().code == ModErrorCode::MissingField);
+            CHECK(result.getErr().packageId == "a.mutator");
+        }
+
+        SECTION("a malformed hash is refused like a missing one")
+        {
+            package.entrySha256 = "ABC";
+            const auto result = resolve({package});
+            REQUIRE_FALSE(result);
+            CHECK(result.getErr().code == ModErrorCode::MissingField);
+        }
+
+        SECTION("a hash on a package without an entry is refused")
+        {
+            auto plain = packageFrom(manifestJson("a.plain"));
+            plain.entrySha256 = sha256Hex("return 1");
+            const auto result = resolve({plain});
+            REQUIRE_FALSE(result);
+            CHECK(result.getErr().code == ModErrorCode::InvalidField);
+        }
+
+        SECTION("changing only the script changes the identity")
+        {
+            package.entrySha256 = sha256Hex("rwe.log('one')\n");
+            const auto first = resolve({package});
+            REQUIRE(first);
+            CHECK(first.get().mods[0].entrySha256 == package.entrySha256);
+            const auto text = canonicalJson(resolvedModSetJson(first.get()));
+            CHECK(text.find("\"entrySha256\":\"" + package.entrySha256 + "\"") != std::string::npos);
+
+            auto edited = package;
+            edited.entrySha256 = sha256Hex("rwe.log('two')\n");
+            CHECK(edited.manifestSha256 == package.manifestSha256);
+            const auto second = resolve({edited});
+            REQUIRE(second);
+            CHECK(second.get().identity != first.get().identity);
+        }
+
+        SECTION("the source path still does not reach the identity")
+        {
+            package.entrySha256 = sha256Hex("return 1");
+            auto moved = package;
+            moved.source = "D:/elsewhere/a.mutator";
+            const auto first = resolve({package});
+            const auto second = resolve({moved});
+            REQUIRE(first);
+            REQUIRE(second);
+            CHECK(first.get().identity == second.get().identity);
+        }
+    }
+
+    TEST_CASE("a presentation script stays out of the identity", "[setup][modsdk]")
+    {
+        // MOD-SDK-013: a HUD cannot desync a game, and +ReloadPresentation
+        // edits it mid-game, so its bytes must not refuse a save or a peer.
+        auto value = manifestJson("a.hud");
+        value["kind"] = "presentation";
+        value["entry"] = "presentation.lua";
+
+        const auto plain = resolve({packageFrom(value)});
+        REQUIRE(plain);
+        CHECK(canonicalJson(resolvedModSetJson(plain.get())).find("\"entrySha256\":null") != std::string::npos);
+
+        auto hashed = packageFrom(value);
+        hashed.entrySha256 = sha256Hex("return 1");
+        const auto refused = resolve({hashed});
+        REQUIRE_FALSE(refused);
+        CHECK(refused.getErr().code == ModErrorCode::InvalidField);
+    }
+
+    TEST_CASE("a package without an entry records a null entry hash", "[setup][modsdk]")
+    {
+        const auto set = resolve({packageFrom(manifestJson("a.content"))});
+        REQUIRE(set);
+        CHECK(canonicalJson(resolvedModSetJson(set.get())).find("\"entrySha256\":null") != std::string::npos);
     }
 }

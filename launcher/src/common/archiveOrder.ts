@@ -29,3 +29,22 @@ export function sortArchivesInLoadOrder<T extends { name: string }>(
  * `archives.ts` pulls in Node's `fs`, `path` and `crypto`.
  */
 export const manifestFileName = "rwe_mod.json";
+
+/**
+ * The engine's rule for a manifest's `entry` (validEntryPath in
+ * src/rwe/setup/ModManifest.cpp): relative, `/`-separated, no empty, `.` or
+ * `..` component, no backslash, colon or NUL, at most 260 characters. A path
+ * the engine would refuse is not followed or accepted here either, so a
+ * manifest cannot point the hasher outside its own mod directory and a peer
+ * cannot report one. Here rather than in `archives.ts` for the same reason as
+ * `manifestFileName`: it is pure, and the game server's validation uses it.
+ */
+export function isValidEntryPath(text: string): boolean {
+  if (text.length === 0 || text.length > 260) return false;
+  if (text.startsWith("/") || /[\\:\0]/.test(text)) return false;
+  return text
+    .split("/")
+    .every(
+      component => component !== "" && component !== "." && component !== ".."
+    );
+}

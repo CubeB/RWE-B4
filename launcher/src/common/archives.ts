@@ -3,11 +3,13 @@ import * as fs from "fs";
 import * as path from "path";
 import {
   archiveExtensions,
+  isValidEntryPath,
   manifestFileName,
   sortArchivesInLoadOrder,
 } from "./archiveOrder";
 export {
   archiveExtensions,
+  isValidEntryPath,
   manifestFileName,
   sortArchivesInLoadOrder,
 } from "./archiveOrder";
@@ -70,6 +72,22 @@ export interface ArchiveInfo {
 export interface ManifestInfo {
   size: number;
   /** SHA-256 of the manifest's bytes, hex. */
+  hash: string;
+  /**
+   * The entry script the manifest names, when it names one and the file is
+   * there (MOD-SDK-014, issue #978). The manifest's bytes do not cover the
+   * script's, so without this two players could agree on `rwe_mod.json` and
+   * still run different Lua. `path` is the manifest's own relative entry,
+   * never a location on this machine.
+   */
+  entry?: EntryScriptInfo;
+}
+
+/** One entry script, as it goes to the other players. */
+export interface EntryScriptInfo {
+  path: string;
+  size: number;
+  /** SHA-256 of the script's bytes, hex. */
   hash: string;
 }
 
@@ -153,6 +171,48 @@ export function listManifest(modDir: string): Promise<ArchiveFile | undefined> {
       }
       throw err;
     });
+}
+
+/**
+ * The entry script a format-1 manifest names, if it names a valid one and the
+ * file exists. A manifest that is not JSON, is a legacy descriptor or names no
+ * entry has none; the engine refuses the broken cases itself, and this only
+ * decides what the other players are told.
+ */
+export async function listEntryScript(
+  modDir: string,
+  manifestPath: string
+): Promise<(ArchiveFile & { entry: string }) | undefined> {
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8"));
+  } catch {
+    return undefined;
+  }
+  if (typeof manifest !== "object" || manifest === null) return undefined;
+  const o = manifest as Record<string, unknown>;
+  if (o.manifestVersion === undefined) return undefined;
+  // MOD-SDK-013: a presentation script is not simulation input, so players
+  // may differ on it -- the engine leaves it out of the identity too.
+  if (o.kind === "presentation") return undefined;
+  const entry = o.entry;
+  if (typeof entry !== "string" || !isValidEntryPath(entry)) return undefined;
+  const filePath = path.join(modDir, ...entry.split("/"));
+  try {
+    const stats = await fs.promises.stat(filePath);
+    if (!stats.isFile()) return undefined;
+    return {
+      name: entry,
+      entry,
+      path: filePath,
+      size: stats.size,
+      mtimeMs: stats.mtimeMs,
+    };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+    throw err;
+  }
 }
 
 /**
@@ -248,14 +308,20 @@ export async function fingerprintMod(
     return { name, archives };
   }
 
-  return {
-    name,
-    archives,
-    manifest: {
-      size: manifestFile.size,
-      hash: await cachedFileHash(manifestFile, cache),
-    },
+  const manifest: ManifestInfo = {
+    size: manifestFile.size,
+    hash: await cachedFileHash(manifestFile, cache),
   };
+  const entryFile = await listEntryScript(modDir, manifestFile.path);
+  if (entryFile !== undefined) {
+    manifest.entry = {
+      path: entryFile.entry,
+      size: entryFile.size,
+      hash: await cachedFileHash(entryFile, cache),
+    };
+  }
+
+  return { name, archives, manifest };
 }
 
 export type {
@@ -271,6 +337,7 @@ export {
   compareArchives,
   compareManifest,
   compareModSets,
+  manifestDifferenceFile,
 } from "./browserArchives";
 
 /**
@@ -306,6 +373,11 @@ export function archiveDigest(
         ...(mod.manifest === undefined
           ? []
           : [`${modName}/${manifestFileName}:${mod.manifest.hash}`]),
+        ...(mod.manifest?.entry === undefined
+          ? []
+          : [
+              `${modName}/${mod.manifest.entry.path}:${mod.manifest.entry.hash}`,
+            ]),
       ].join("\n");
     })
     .join("\n");

@@ -67,6 +67,10 @@ namespace rwe
                 ? package.id + "/presentation.lua"
                 : package.scriptName;
             resolved.scriptPath = package.scriptPath;
+            // Deliberately not readVerifiedModScript: +ReloadPresentation
+            // exists to pick up an edited HUD script, and presentation takes
+            // no part in the simulation, so its script carries no entry hash
+            // (MOD-SDK-013, MOD-SDK-014).
             resolved.source = readPresentationScript(package.id, package.scriptPath);
             resolved.options = package.options;
             result.push_back(std::move(resolved));

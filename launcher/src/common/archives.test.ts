@@ -12,8 +12,10 @@ import {
   compareModSets,
   fingerprintMod,
   hashFile,
+  isValidEntryPath,
   listArchives,
   listManifest,
+  manifestDifferenceFile,
   manifestFileName,
   sortArchivesInLoadOrder,
 } from "./archives";
@@ -719,5 +721,144 @@ describe("archiveDigest", () => {
     expect(archiveDigest(["ta"], withManifest)).not.toBe(
       archiveDigest(["ta"], ta("x"))
     );
+  });
+});
+
+describe("fingerprintMod, on the entry script (issue #978)", () => {
+  const scripted = (entry: string) =>
+    JSON.stringify({
+      manifestVersion: 1,
+      id: "a.mutator",
+      version: "1.0.0",
+      kind: "mutator",
+      entry,
+    });
+
+  function scriptedMod(script: string, entry = "scripts/main.lua"): string {
+    const dir = makeTempDir();
+    fs.writeFileSync(path.join(dir, manifestFileName), scripted(entry));
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "scripts", "main.lua"), script);
+    return dir;
+  }
+
+  it("covers the script the manifest names, by its relative path", async () => {
+    const fingerprint = await fingerprintMod("m", scriptedMod("abc"), {});
+    expect(fingerprint.manifest?.entry).toEqual({
+      path: "scripts/main.lua",
+      size: 3,
+      hash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    });
+  });
+
+  it("changes when only the script changes", async () => {
+    const before = await fingerprintMod("m", scriptedMod("rwe.log('one')"), {});
+    const after = await fingerprintMod("m", scriptedMod("rwe.log('two')"), {});
+    expect(after.manifest?.hash).toBe(before.manifest?.hash);
+    expect(after.manifest?.entry?.hash).not.toBe(before.manifest?.entry?.hash);
+    expect(compareManifest(before.manifest, after.manifest)).toEqual({
+      kind: "different",
+      script: "scripts/main.lua",
+    });
+    expect(archiveDigest(["m"], [before])).not.toBe(
+      archiveDigest(["m"], [after])
+    );
+  });
+
+  it("does not follow an entry the engine would refuse", async () => {
+    for (const entry of ["../outside.lua", "/abs.lua", "a\\b.lua", "c:x.lua"]) {
+      const fingerprint = await fingerprintMod(
+        "m",
+        scriptedMod("x", entry),
+        {}
+      );
+      expect(fingerprint.manifest).toBeDefined();
+      expect(fingerprint.manifest?.entry).toBeUndefined();
+    }
+  });
+
+  it("reports no entry when the named script is not there", async () => {
+    const dir = scriptedMod("x");
+    fs.unlinkSync(path.join(dir, "scripts", "main.lua"));
+    expect(
+      (await fingerprintMod("m", dir, {})).manifest?.entry
+    ).toBeUndefined();
+  });
+
+  it("leaves a presentation script out, as the engine does (MOD-SDK-013)", async () => {
+    const dir = makeTempDir();
+    fs.writeFileSync(
+      path.join(dir, manifestFileName),
+      JSON.stringify({
+        manifestVersion: 1,
+        id: "a.hud",
+        version: "1.0.0",
+        kind: "presentation",
+        entry: "presentation.lua",
+      })
+    );
+    fs.writeFileSync(path.join(dir, "presentation.lua"), "x");
+    const fingerprint = await fingerprintMod("m", dir, {});
+    expect(fingerprint.manifest).toBeDefined();
+    expect(fingerprint.manifest?.entry).toBeUndefined();
+  });
+});
+
+describe("compareManifest, on the entry script", () => {
+  const entry = (hash: string) => ({ path: "s.lua", size: 1, hash });
+
+  it("agrees when the scripts agree", () => {
+    expect(
+      compareManifest(
+        { size: 1, hash: "m", entry: entry("e") },
+        { size: 1, hash: "m", entry: entry("e") }
+      )
+    ).toBeUndefined();
+  });
+
+  it("names the script when one side lacks it", () => {
+    expect(
+      compareManifest(
+        { size: 1, hash: "m", entry: entry("e") },
+        { size: 1, hash: "m" }
+      )
+    ).toEqual({ kind: "missing", script: "s.lua" });
+    expect(
+      compareManifest(
+        { size: 1, hash: "m" },
+        { size: 1, hash: "m", entry: entry("e") }
+      )
+    ).toEqual({ kind: "extra", script: "s.lua" });
+  });
+
+  it("reports a manifest difference as the manifest, not the script", () => {
+    const difference = compareManifest(
+      { size: 1, hash: "m", entry: entry("e") },
+      { size: 1, hash: "n", entry: entry("f") }
+    );
+    expect(difference).toEqual({ kind: "different" });
+    expect(manifestDifferenceFile(difference!)).toBe(manifestFileName);
+    expect(manifestDifferenceFile({ kind: "different", script: "s.lua" })).toBe(
+      "s.lua"
+    );
+  });
+});
+
+describe("isValidEntryPath", () => {
+  it("mirrors the engine's rule", () => {
+    expect(isValidEntryPath("scripts/main.lua")).toBe(true);
+    for (const bad of [
+      "",
+      "/a",
+      "a//b",
+      "./a",
+      "a/../b",
+      "a\\b",
+      "c:a",
+      "a\0b",
+      "x".repeat(261),
+    ]) {
+      expect(isValidEntryPath(bad)).toBe(false);
+    }
   });
 });

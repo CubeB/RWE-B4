@@ -1036,9 +1036,17 @@ namespace rwe
         {
             return Err(manifest.getErr());
         }
-        return Ok(ModPackage{manifest.get(), sha256Hex(rawManifestText), source});
+        // entrySha256 starts empty: the caller reads the entry script and sets
+        // it (MOD-SDK-014). Named here because MinGW's -Werror build refuses
+        // a missing field initialiser.
+        return Ok(ModPackage{manifest.get(), sha256Hex(rawManifestText), source, {}});
     }
 
+
+    bool isModSha256Hex(std::string_view text)
+    {
+        return text.size() == 64 && text.find_first_not_of("0123456789abcdef") == std::string_view::npos;
+    }
 
     std::string canonicalJson(const json& value)
     {
@@ -1062,6 +1070,7 @@ namespace rwe
             package["api"] = mod.manifest.api;
             package["entry"] = mod.manifest.entry ? json(*mod.manifest.entry) : json(nullptr);
             package["manifestSha256"] = mod.manifestSha256;
+            package["entrySha256"] = mod.entrySha256.empty() ? json(nullptr) : json(mod.entrySha256);
 
             auto features = mod.manifest.features;
             std::sort(features.begin(), features.end());
@@ -1110,6 +1119,23 @@ namespace rwe
             {
                 return fail(ModErrorCode::InvalidField, package.manifest.id,
                     "manifestSha256 must be 64 lowercase hex characters; build the package with modPackageFromJson");
+            }
+            // MOD-SDK-013 keeps presentation scripts out of the identity: what
+            // a HUD draws never reaches the simulation, and +ReloadPresentation
+            // exists to change it mid-game. Only simulation scripts are hashed.
+            const auto hashesEntry = package.manifest.entry && package.manifest.kind != ModKind::Presentation;
+            if (hashesEntry && !isModSha256Hex(package.entrySha256))
+            {
+                return fail(ModErrorCode::MissingField, package.manifest.id,
+                    "entry \"" + *package.manifest.entry
+                        + "\" has no content hash; read the script and set entrySha256 to its SHA-256");
+            }
+            if (!hashesEntry && !package.entrySha256.empty())
+            {
+                return fail(ModErrorCode::InvalidField, package.manifest.id,
+                    package.manifest.entry
+                        ? "entrySha256 is set on a presentation package, whose script is not part of the identity"
+                        : "entrySha256 is set but the manifest names no entry script");
             }
             if (package.manifest.api != environment.apiVersion)
             {
@@ -1244,6 +1270,7 @@ namespace rwe
             ResolvedMod mod;
             mod.manifest = package.manifest;
             mod.manifestSha256 = package.manifestSha256;
+            mod.entrySha256 = package.entrySha256;
 
             const auto selection = selectedOptions.find(id);
             for (const auto& option : package.manifest.options)

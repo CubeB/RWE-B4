@@ -52,9 +52,6 @@ namespace rwe
         const std::string& packageId,
         std::uint32_t seed);
 
-    /** Reads one package script with the shared 1 MiB cap. */
-    std::string readModAiScriptFile(const std::string& packageId, const std::string& path);
-
     /**
      * The first 32 bits of the resolved-set identity, or 0 when there is no
      * set. Kept here so the loader and a future replay/join path derive the

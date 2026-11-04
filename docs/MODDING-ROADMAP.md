@@ -73,9 +73,14 @@ is the offline dry run. The rules and the RWE-original evidence boundary are
 recorded in `MODDING-SDK-FINDINGS.md` MOD-SDK-002 and MOD-SDK-003. Still open
 for this item: an archive-embedded manifest or TDF adapter (the ADR-0002 D4
 reconciliation), content hashing of entry scripts and loose files, and
-launcher consumption of a resolved set. Entry scripts are not yet part of the
-identity, so callers must not treat the current identity as the complete
-simulation identity.
+launcher consumption of a resolved set.
+
+Progress 2026-11-04 (#978, local branch, not yet compiled): entry scripts are
+part of the identity. Each simulation package's `entrySha256` is in the
+format-2 resolved set, every simulation script reader refuses bytes that no
+longer match, and the launcher fingerprint compares the script. Presentation
+scripts stay out, as MOD-SDK-013 decided. Recorded in MOD-SDK-014. Still open:
+loose content files beyond the entry, and an engine build and test run.
 
 ### MOD-03: Reuse installation and canonical content resolution
 

@@ -43,7 +43,7 @@ import {
   CanStartGameError,
 } from "../gameClient/state";
 import { assertNever, findAndMap } from "../../common/util";
-import { manifestFileName } from "../../common/archiveOrder";
+import { manifestDifferenceFile } from "../../common/browserArchives";
 
 function GameSettingsPanel() {
   return (
@@ -306,7 +306,7 @@ function errToString(err: CanStartGameError, game: CurrentGameState): string {
               ...m.differences.map(d => `${m.modName}/${d.archiveName}`),
               ...(m.manifest === undefined
                 ? []
-                : [`${m.modName}/${manifestFileName}`]),
+                : [`${m.modName}/${manifestDifferenceFile(m.manifest)}`]),
             ])
             .join(", ");
           return `${playerName(

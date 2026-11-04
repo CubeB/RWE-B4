@@ -473,6 +473,27 @@ namespace
         {
             throw std::runtime_error(package.getErr().describe());
         }
+        // MOD-SDK-014: the entry script's bytes join the identity. The path
+        // is the manifest's own normalized relative entry, so where the
+        // package sits on disk still cannot change what is hashed.
+        const auto& entry = package.get().manifest.entry;
+        if (entry && package.get().manifest.kind != rwe::ModKind::Presentation)
+        {
+            const auto scriptPath = path.parent_path() / *entry;
+            std::ifstream scriptFile(scriptPath, std::ios::binary);
+            if (!scriptFile)
+            {
+                throw std::runtime_error(package.get().manifest.id + ": entry script " + *entry
+                    + " is missing (looked for " + scriptPath.string() + ")");
+            }
+            const std::string script(
+                (std::istreambuf_iterator<char>(scriptFile)), std::istreambuf_iterator<char>());
+            if (script.size() > 1024 * 1024)
+            {
+                throw std::runtime_error(package.get().manifest.id + ": entry script is larger than 1 MiB");
+            }
+            package.get().entrySha256 = rwe::sha256Hex(script);
+        }
         return std::move(package.get());
     }
 
@@ -523,6 +544,7 @@ namespace
             launch.id = mod.manifest.id;
             launch.version = mod.manifest.versionText;
             launch.manifestSha256 = mod.manifestSha256;
+            launch.entrySha256 = mod.entrySha256;
             launch.kind = rwe::modKindText(mod.manifest.kind);
             launch.features = mod.manifest.features;
             launch.resourceDirectories = mod.manifest.resourceDirectories;
@@ -654,31 +676,7 @@ int main(int argc, char* argv[])
                 std::vector<rwe::ModPackage> packages;
                 for (const auto index : manifestIndices)
                 {
-                    const auto path = nativeArguments.at(index);
-                    const auto text = readManifestText(path);
-                    nlohmann::json manifestValue;
-                    try
-                    {
-                        manifestValue = nlohmann::json::parse(text);
-                    }
-                    catch (const std::exception& e)
-                    {
-                        throw std::runtime_error(path.string() + ": invalid JSON: " + e.what());
-                    }
-                    // MOD-SDK-002: a legacy descriptor has no stable id, so
-                    // derive one from its bytes until MOD-03 hashes the
-                    // package's real content.
-                    std::string implicitId;
-                    if (!manifestValue.is_object() || !manifestValue.contains("manifestVersion"))
-                    {
-                        implicitId = "legacy." + rwe::sha256Hex(text).substr(0, 16);
-                    }
-                    auto package = rwe::modPackageFromJson(manifestValue, text, path.string(), implicitId);
-                    if (!package)
-                    {
-                        throw std::runtime_error(package.getErr().describe());
-                    }
-                    packages.push_back(std::move(package.get()));
+                    packages.push_back(readModPackage(nativeArguments.at(index)));
                 }
 
                 rwe::ModOptionSelections selections;
@@ -779,13 +777,18 @@ int main(int argc, char* argv[])
                 auto packageReports = nlohmann::json::array();
                 for (const auto& package : content.packages)
                 {
-                    std::ifstream scriptFile(package.scriptPath, std::ios::binary);
-                    if (!scriptFile)
+                    // The same filter as the loader's transform pass: only a
+                    // pre-match mutator changes definitions. A presentation
+                    // package has no entry hash (MOD-SDK-014) and an AI or
+                    // runtime package is not a transform.
+                    const auto isMutator = package.kind.empty() || package.kind == "mutator";
+                    const auto isRuntime = std::any_of(package.features.begin(), package.features.end(),
+                        [](const std::string& feature) { return feature.rfind("runtime.", 0) == 0; });
+                    if (!isMutator || isRuntime || package.scriptPath.empty())
                     {
-                        throw std::runtime_error("Mod " + package.id + ": cannot open " + package.scriptPath);
+                        continue;
                     }
-                    std::string source(
-                        (std::istreambuf_iterator<char>(scriptFile)), std::istreambuf_iterator<char>());
+                    const auto source = rwe::readVerifiedModScript(package);
                     rwe::ModTransformScript script{package.id, package.scriptName, source, package.options};
                     const auto transformed = rwe::runUnitTransform(script, records);
                     if (!transformed.ok)
@@ -825,6 +828,8 @@ int main(int argc, char* argv[])
                 output["legacy"] = package.manifest.legacy;
                 output["entry"] = package.manifest.entry ? nlohmann::json(*package.manifest.entry) : nlohmann::json(nullptr);
                 output["manifestSha256"] = package.manifestSha256;
+                output["entrySha256"] = package.entrySha256.empty() ? nlohmann::json(nullptr)
+                                                                    : nlohmann::json(package.entrySha256);
                 output["requires"] = nlohmann::json::array();
                 for (const auto& dependency : package.manifest.dependencies)
                 {
