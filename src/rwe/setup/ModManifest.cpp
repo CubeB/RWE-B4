@@ -1036,7 +1036,10 @@ namespace rwe
         {
             return Err(manifest.getErr());
         }
-        return Ok(ModPackage{manifest.get(), sha256Hex(rawManifestText), source});
+        // entrySha256 starts empty: the caller reads the entry script and sets
+        // it (MOD-SDK-014). Named here because MinGW's -Werror build refuses
+        // a missing field initialiser.
+        return Ok(ModPackage{manifest.get(), sha256Hex(rawManifestText), source, {}});
     }
 
 
