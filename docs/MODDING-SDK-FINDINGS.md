@@ -1005,6 +1005,15 @@ Behind `runtime.unit-query@1`, `rwe.unit_info(unit)` returns a table with
   header gains one declaration and no types. The three-argument `bind`
   remains for tests that supply only an existence check.
 
+`store_get`/`store_set` were rebuilt on the same helpers as `unit_get` and
+`unit_set`, so no Lua-callable function holds a C++ object across `luaL_error`
+any more. One behaviour changes with them: `store_set` used to test
+`lua_isnumber` first, which accepts numeric strings, so `store_set(k, "12")`
+stored the number 12. A string now stays a string, as it does in `unit_set`.
+No shipped package depended on the old conversion. The quota error no longer
+appends the package id; the runtime log already names the package it
+disables.
+
 Still open for #970: deferred effects, a decision on limb damage, and the
 two-peer acceptance run.
 

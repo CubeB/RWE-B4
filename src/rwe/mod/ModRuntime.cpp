@@ -280,71 +280,6 @@ namespace rwe
             return 0;
         }
 
-        static int storeGetFunction(lua_State* state)
-        {
-            auto* context = *static_cast<Context**>(lua_getextraspace(state));
-            auto* impl = context->impl;
-            const auto& package = impl->packages[context->index];
-            const std::string key = luaL_checkstring(state, 1);
-            const auto value = impl->store->getGlobal(package.spec.id, key);
-            if (!value)
-            {
-                lua_pushnil(state);
-                return 1;
-            }
-            switch (value->type)
-            {
-            case ModValueType::I32:
-                lua_pushinteger(state, value->i32);
-                break;
-            case ModValueType::F32:
-                lua_pushnumber(state, value->f32);
-                break;
-            case ModValueType::String:
-            case ModValueType::Bytes:
-                lua_pushlstring(state, value->bytes.data(), value->bytes.size());
-                break;
-            }
-            return 1;
-        }
-
-        static int storeSetFunction(lua_State* state)
-        {
-            auto* context = *static_cast<Context**>(lua_getextraspace(state));
-            auto* impl = context->impl;
-            const auto& package = impl->packages[context->index];
-            const std::string key = luaL_checkstring(state, 1);
-            std::optional<ModValue> value;
-            if (lua_isboolean(state, 2))
-            {
-                value = ModValue::integer(lua_toboolean(state, 2) ? 1 : 0);
-            }
-            else if (lua_isnumber(state, 2))
-            {
-                const auto number = static_cast<float>(lua_tonumber(state, 2));
-                if (!std::isfinite(number))
-                {
-                    return luaL_error(state, "store_set value must be finite");
-                }
-                value = ModValue::number(number);
-            }
-            else if (lua_isstring(state, 2))
-            {
-                std::size_t length = 0;
-                const char* text = lua_tolstring(state, 2, &length);
-                value = ModValue::text(std::string(text, length));
-            }
-            else
-            {
-                return luaL_error(state, "store_set value must be a number, string or boolean");
-            }
-            if (!impl->store->setGlobal(package.spec.id, key, *value))
-            {
-                return luaL_error(state, "store quota exceeded for %s", package.spec.id.c_str());
-            }
-            return 0;
-        }
-
         // Reads argument `index` as a store value without creating any C++
         // object, so a refusal can raise a Lua error safely: Lua is built as
         // C, and luaL_error longjmps past C++ destructors.
@@ -427,6 +362,48 @@ namespace rwe
             }
             out = UnitId(static_cast<unsigned int>(raw));
             return true;
+        }
+
+        // rwe.store_get(key) -> value or nil, from this package's global
+        // namespace.
+        static int storeGetFunction(lua_State* state)
+        {
+            auto* context = *static_cast<Context**>(lua_getextraspace(state));
+            auto* impl = context->impl;
+            std::size_t keyLength = 0;
+            const char* keyText = luaL_checklstring(state, 1, &keyLength);
+            pushValue(state,
+                impl->store->getGlobal(impl->packages[context->index].spec.id, std::string(keyText, keyLength)));
+            return 1;
+        }
+
+        // rwe.store_set(key, value). Written in the same shape as unit_set,
+        // with no C++ object alive at any luaL_error (MOD-SDK-016).
+        static int storeSetFunction(lua_State* state)
+        {
+            auto* context = *static_cast<Context**>(lua_getextraspace(state));
+            auto* impl = context->impl;
+            std::size_t keyLength = 0;
+            const char* keyText = luaL_checklstring(state, 1, &keyLength);
+            const auto kind = valueKind(state, 2);
+            if (kind == ValueKind::Invalid)
+            {
+                return luaL_error(state, "store_set value must be a number, string or boolean");
+            }
+            if (kind == ValueKind::NonFinite)
+            {
+                return luaL_error(state, "store_set value must be finite");
+            }
+            bool stored = false;
+            {
+                stored = impl->store->setGlobal(
+                    impl->packages[context->index].spec.id, std::string(keyText, keyLength), valueAt(state, 2, kind));
+            }
+            if (!stored)
+            {
+                return luaL_error(state, "store quota exceeded");
+            }
+            return 0;
         }
 
         // rwe.tick() -> the simulation tick the current call runs in.
