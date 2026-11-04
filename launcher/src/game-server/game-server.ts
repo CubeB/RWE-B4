@@ -4,7 +4,7 @@ import type { Namespace, Socket } from "socket.io";
 import {
   ModFingerprint,
   checkArchiveAgreement,
-  manifestFileName,
+  manifestDifferenceFile,
 } from "../common/archives";
 import { assertNever, choose, findAndMap, getAddr } from "../common/util";
 import * as protocol from "./protocol";
@@ -937,7 +937,7 @@ export class GameServer {
               ...x.differences.map(d => `${x.modName}/${d.archiveName}`),
               ...(x.manifest === undefined
                 ? []
-                : [`${x.modName}/${manifestFileName}`]),
+                : [`${x.modName}/${manifestDifferenceFile(x.manifest)}`]),
             ])
             .join(", ");
           return `${this.playerLabel(room, m.playerId)} has ${files}`;

@@ -618,17 +618,7 @@ namespace rwe
                             throw std::runtime_error("Mod " + package.id
                                 + ": the recorded mod set has not been resolved on this machine");
                         }
-                        std::ifstream scriptFile(package.scriptPath, std::ios::binary);
-                        if (!scriptFile)
-                        {
-                            throw std::runtime_error("Mod " + package.id + ": cannot open " + package.scriptPath);
-                        }
-                        std::string source(
-                            (std::istreambuf_iterator<char>(scriptFile)), std::istreambuf_iterator<char>());
-                        if (source.size() > 1024 * 1024)
-                        {
-                            throw std::runtime_error("Mod " + package.id + ": script is larger than 1 MiB");
-                        }
+                        const auto source = readVerifiedModScript(package);
 
                         ModTransformScript script{package.id, package.scriptName, source, package.options};
                         auto transformed = runUnitTransform(script, records);
@@ -974,16 +964,7 @@ namespace rwe
                     throw std::runtime_error("Mod " + package.id
                         + ": the recorded runtime set has not been resolved on this machine");
                 }
-                std::ifstream scriptFile(package.scriptPath, std::ios::binary);
-                if (!scriptFile)
-                {
-                    throw std::runtime_error("Mod " + package.id + ": cannot open " + package.scriptPath);
-                }
-                std::string source((std::istreambuf_iterator<char>(scriptFile)), std::istreambuf_iterator<char>());
-                if (source.size() > 1024 * 1024)
-                {
-                    throw std::runtime_error("Mod " + package.id + ": script is larger than 1 MiB");
-                }
+                const auto source = readVerifiedModScript(package);
                 runtimePackages.push_back({package.id, package.scriptName, source, package.options});
             }
             if (!runtimePackages.empty())

@@ -16,7 +16,9 @@ namespace rwe
     // foundation; no original-game counterpart.
     constexpr int currentModManifestVersion = 1;
     constexpr int currentModApiVersion = 1;
-    constexpr int currentResolvedSetFormatVersion = 1;
+    // Format 2 adds each package's entrySha256 (MOD-SDK-014). A format-1
+    // identity never covered script bytes, so the two are not comparable.
+    constexpr int currentResolvedSetFormatVersion = 2;
 
     enum class ModErrorCode
     {
@@ -148,6 +150,14 @@ namespace rwe
         // renamed folder or a different download path cannot refuse a save or
         // a multiplayer launch (MOD-SDK-003).
         std::string source;
+        // Last, so positional initialisers above stay valid.
+        // SHA-256 of the entry script's bytes, lowercase hex. Required when
+        // the manifest names an entry, so a script edited without touching
+        // rwe_mod.json changes the identity (MOD-SDK-014). Empty when there
+        // is no entry, and for a presentation package, whose script is kept
+        // out of the identity (MOD-SDK-013). The caller reads the file; the
+        // path stays out.
+        std::string entrySha256;
     };
 
     Result<ModManifest, ModManifestError> parseModManifest(
@@ -162,6 +172,10 @@ namespace rwe
         const std::string& rawManifestText,
         const std::string& source,
         const std::string& implicitLegacyId = {});
+
+    // True for 64 lowercase hex characters, the form every content hash in
+    // a resolved set takes.
+    bool isModSha256Hex(std::string_view text);
 
     struct ModResolutionEnvironment
     {
@@ -184,6 +198,7 @@ namespace rwe
     {
         ModManifest manifest;
         std::string manifestSha256;
+        std::string entrySha256;
         std::map<std::string, nlohmann::json> options;
         // Only the keys this package ends up owning, after `replaces` is
         // applied in load order.

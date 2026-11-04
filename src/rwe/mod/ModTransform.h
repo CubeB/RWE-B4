@@ -87,6 +87,11 @@ namespace rwe
         // Resource-directory overrides for this package, e.g. ProTA's
         // weaponP/guiP roots. Sorted by map order.
         std::map<std::string, std::string> resourceDirectories;
+        // SHA-256 of the entry script as it was resolved (MOD-SDK-014).
+        // Recorded in saves and replays; every reader checks the bytes it
+        // runs against it, so a script edited after resolution is refused.
+        // Last, so the positional initialisers in tests stay valid.
+        std::string entrySha256;
     };
 
     struct ModLaunchContent
@@ -108,6 +113,13 @@ namespace rwe
     // this one kept its files.
     nlohmann::json modLaunchContentToJson(const ModLaunchContent* content);
     std::shared_ptr<const ModLaunchContent> modLaunchContentFromJson(const nlohmann::json& value);
+
+    // Reads a package's entry script from its resolved path and refuses it
+    // unless its bytes still hash to entrySha256. Throws std::runtime_error
+    // naming the package. Every consumer -- transform, runtime, AI and
+    // presentation -- reads scripts through this, so none can run bytes the
+    // identity does not cover.
+    std::string readVerifiedModScript(const ModLaunchPackage& package);
 
     // Applies one script to `units` in place. A failed script leaves `units`
     // untouched: writes are journaled and committed only on success, so a

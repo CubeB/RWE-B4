@@ -1,7 +1,11 @@
 ﻿#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <rwe/mod/ModTransform.h>
+#include <rwe/util/Sha256.h>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -241,6 +245,7 @@ namespace rwe
             "C:/Downloads/a/main.lua", {{"multiplier", 1.5}}, "mutator", {}, {}});
         content.packages.push_back({"b.second", "2.0.0", std::string(64, 'c'), "b.second/scripts/main.lua",
             "C:/Downloads/b/main.lua", {}, "mutator", {}, {}});
+        content.packages[1].entrySha256 = std::string(64, 'e');
 
         const auto json = modLaunchContentToJson(&content);
         REQUIRE_FALSE(json.is_null());
@@ -255,6 +260,7 @@ namespace rwe
         REQUIRE(restored->packages.size() == 2);
         CHECK(restored->packages[1].id == "b.second");
         CHECK(restored->packages[1].manifestSha256 == std::string(64, 'c'));
+        CHECK(restored->packages[1].entrySha256 == std::string(64, 'e'));
         CHECK(restored->packages[1].scriptPath.empty());
 
         CHECK(modLaunchContentToJson(nullptr).is_null());
@@ -288,8 +294,70 @@ namespace rwe
         const auto versionMessage = describeModSetMismatch(first.get(), different.get());
         CHECK(versionMessage.find("b.second") != std::string::npos);
 
+        // Issue #978: the same manifest with an edited script is named as a
+        // script difference, not reported as the generic identity mismatch.
+        auto edited = std::make_shared<ModLaunchContent>(*first);
+        edited->identity = std::string(64, '9');
+        edited->packages[0].entrySha256 = std::string(64, '8');
+        const auto scriptMessage = describeModSetMismatch(first.get(), edited.get());
+        CHECK(scriptMessage.find("a.first") != std::string::npos);
+        CHECK(scriptMessage.find("different script") != std::string::npos);
+
         CHECK(describeModSetMismatch(first.get(), nullptr).find("without mods") != std::string::npos);
         CHECK(describeModSetMismatch(nullptr, first.get()).find("no mods") != std::string::npos);
+    }
+
+    TEST_CASE("a script is read only while its bytes match the resolved hash", "[modsdk][modtransform]")
+    {
+        namespace fs = std::filesystem;
+        const auto path = fs::temp_directory_path() / "rwe-modtransform-verified-script.lua";
+        const std::string original = "rwe.log('original')\n";
+        {
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            out << original;
+        }
+
+        ModLaunchPackage package;
+        package.id = "a.verified";
+        package.scriptName = "a.verified/scripts/main.lua";
+        package.scriptPath = path.string();
+        package.entrySha256 = sha256Hex(original);
+
+        CHECK(readVerifiedModScript(package) == original);
+
+        SECTION("an edit after resolution is refused and names the package")
+        {
+            {
+                std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                out << "rwe.log('edited')\n";
+            }
+            try
+            {
+                readVerifiedModScript(package);
+                FAIL("an edited script was read");
+            }
+            catch (const std::runtime_error& e)
+            {
+                const std::string message = e.what();
+                CHECK(message.find("a.verified") != std::string::npos);
+                CHECK(message.find("changed after the mod set was resolved") != std::string::npos);
+            }
+        }
+
+        SECTION("a package with no recorded hash is refused rather than trusted")
+        {
+            package.entrySha256.clear();
+            REQUIRE_THROWS_AS(readVerifiedModScript(package), std::runtime_error);
+        }
+
+        SECTION("a missing file is refused")
+        {
+            package.scriptPath = (fs::temp_directory_path() / "rwe-modtransform-no-such-script.lua").string();
+            REQUIRE_THROWS_AS(readVerifiedModScript(package), std::runtime_error);
+        }
+
+        std::error_code ignored;
+        fs::remove(path, ignored);
     }
 
     TEST_CASE("format 1 exposes only the three integer cost keys", "[modsdk][modtransform]")

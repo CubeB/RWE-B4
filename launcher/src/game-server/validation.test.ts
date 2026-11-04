@@ -103,6 +103,22 @@ describe("lobby payload validation", () => {
     ).toBeUndefined();
   });
 
+  it("checks a reported entry script and refuses a path the engine would", () => {
+    const hash = "a".repeat(64);
+    const withEntry = (entry: unknown) => [
+      { name: "mod", archives: [], manifest: { size: 4, hash, entry } },
+    ];
+    const good = withEntry({ path: "scripts/main.lua", size: 3, hash });
+    expect(valid.modFingerprints(good)).toEqual(good);
+    expect(
+      valid.modFingerprints(withEntry({ path: "../x.lua", size: 3, hash }))
+    ).toBeUndefined();
+    expect(
+      valid.modFingerprints(withEntry({ path: "s.lua", size: 3, hash: "zz" }))
+    ).toBeUndefined();
+    expect(valid.modFingerprints(withEntry(null))).toBeUndefined();
+  });
+
   it("only reads fields off a real object", () => {
     expect(valid.payload(null)).toBeUndefined();
     expect(valid.payload([1])).toBeUndefined();

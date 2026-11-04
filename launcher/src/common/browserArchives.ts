@@ -1,5 +1,5 @@
 import type { ArchiveInfo, ManifestInfo, ModFingerprint } from "./archives";
-import { sortArchivesInLoadOrder } from "./archiveOrder";
+import { manifestFileName, sortArchivesInLoadOrder } from "./archiveOrder";
 
 export interface ArchiveDifference {
   archiveName: string;
@@ -16,6 +16,11 @@ export interface ArchiveDifference {
  */
 export interface ManifestDifference {
   kind: "missing" | "extra" | "different";
+  /**
+   * Set when the manifests' bytes agree and their entry scripts do not
+   * (issue #978): the script path to name, so a refusal says which file.
+   */
+  script?: string;
 }
 export interface ModDifference {
   modName: string;
@@ -80,7 +85,33 @@ export function compareManifest(
   if (theirs === undefined) {
     return { kind: "missing" };
   }
-  return mine.hash === theirs.hash ? undefined : { kind: "different" };
+  if (mine.hash !== theirs.hash) {
+    return { kind: "different" };
+  }
+  const a = mine.entry,
+    b = theirs.entry;
+  if (a === undefined && b === undefined) {
+    return undefined;
+  }
+  if (
+    a !== undefined &&
+    b !== undefined &&
+    a.path === b.path &&
+    a.hash === b.hash
+  ) {
+    return undefined;
+  }
+  // The same manifest names the same path on both sides, so a presence
+  // difference is a script one player has and the other lacks.
+  const script = (a ?? b)!.path;
+  if (a === undefined) return { kind: "extra", script };
+  if (b === undefined) return { kind: "missing", script };
+  return { kind: "different", script };
+}
+
+/** The file a manifest difference is about, relative to its mod. */
+export function manifestDifferenceFile(difference: ManifestDifference): string {
+  return difference.script ?? manifestFileName;
 }
 
 export function compareModSets(

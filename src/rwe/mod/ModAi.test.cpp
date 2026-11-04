@@ -8,6 +8,7 @@
 #include <rwe/mod/ModTransform.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/sim_test_util.h>
+#include <rwe/util/Sha256.h>
 #include <string>
 #include <vector>
 
@@ -371,6 +372,7 @@ namespace rwe
             std::ofstream out(path, std::ios::binary | std::ios::trunc);
             out << "function on_tick(tick) end\n";
         }
+        const std::string scriptText = "function on_tick(tick) end\n";
 
         auto content = std::make_shared<ModLaunchContent>();
         content->identity = "0123abcd" + std::string(56, '0');
@@ -379,6 +381,7 @@ namespace rwe
         package.kind = "ai";
         package.scriptName = "scripts/main.lua";
         package.scriptPath = path.string();
+        package.entrySha256 = sha256Hex(scriptText);
         package.options = {{"aggression", 2}};
         content->packages.push_back(std::move(package));
 
@@ -390,6 +393,22 @@ namespace rwe
         CHECK(script->source.find("on_tick") != std::string::npos);
         CHECK(script->options.at("aggression") == 2);
         CHECK(modAiSeedFromContent(content.get()) == 0x0123abcdu);
+
+        SECTION("a script edited after resolution is refused")
+        {
+            // MOD-SDK-014: the bytes run must be the bytes the identity
+            // covers, or two peers can agree on a set and play different AIs.
+            content->packages[0].entrySha256 = sha256Hex("function on_tick(tick) return 1 end\n");
+            try
+            {
+                resolveModAiScript(content.get(), "", 0);
+                FAIL("an edited script was accepted");
+            }
+            catch (const std::runtime_error& e)
+            {
+                CHECK(std::string(e.what()).find("changed after the mod set was resolved") != std::string::npos);
+            }
+        }
 
         SECTION("a package that names no local path is refused")
         {

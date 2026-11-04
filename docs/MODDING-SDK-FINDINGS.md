@@ -158,11 +158,9 @@ location is.
 
 The manifest hash is supplied by the caller and computed over the raw manifest
 bytes, not over a re-serialization, so whitespace and key order in the author
-file are part of what peers must agree on. Entry script bytes are not yet
-hashed here: MOD-05 must extend the identity to the script and content files
-before any mutator ships, and MOD-SDK-004 will record that when it lands. Until
-then this identity is complete only for manifests without scripts, and callers
-must not treat it as the full simulation identity.
+file are part of what peers must agree on. Entry script bytes were not
+hashed when this entry was written; MOD-SDK-014 adds them (resolved-set format
+2). Loose content files beyond the entry remain outside the identity.
 
 `schemaVersion` of the package registry is unrelated and unchanged. A resolved
 set is derived data; the registry remains the installed-content record.
@@ -739,6 +737,80 @@ plus this change), after a clean rebuild of `librwe`, `rwe_test` and `rwe`:
   deliberate; a mismatch between peers cannot desync a game, because nothing
   they draw reaches the simulation.
 
+## MOD-SDK-014: entry scripts in the resolved identity
+
+Status: implemented 2026-11-04 on the local branch `978-hash-entry-scripts`,
+issue #978. RWE-original; inherits MOD-SDK-001's boundary. There is no
+original-game counterpart and no byte-tactics comparison applies.
+
+**Not yet compiled or run.** The machine this was written on had no C++
+toolchain, so the engine half -- including the new `[modsdk]`, `[modai]` and
+`[modtransform]` cases -- has not been built or executed. The launcher half
+was: `tsc` clean, ESLint clean apart from one existing warning in an untouched
+file, and Jest 15 suites, 177 tests. Nothing here may be called verified until
+`rwe_test`, the `rwe` target and `rwe_setup` have been built and run.
+
+The gap this closes: MOD-SDK-003's identity covered the manifest's bytes but
+not the script it names, so a script edited without touching `rwe_mod.json`
+kept the same identity, and a save, a replay and a peer check would all agree
+while running different Lua.
+
+### What is hashed
+
+- Each package carries `entrySha256`, the lowercase hex SHA-256 of its entry
+  script's raw bytes. The resolved-set JSON gains `"entrySha256"` per package
+  (`null` when there is none), and the resolved-set `formatVersion` goes from 1
+  to 2, because a format-1 identity never covered scripts and the two are not
+  comparable.
+- The resolver refuses a package whose manifest names an entry but which
+  carries no well-formed hash (`MissingField`), and a hash on a package with no
+  entry (`InvalidField`). The caller reads the file; `rwe_setup`'s
+  `readModPackage` does it, relative to the manifest, so the path still stays
+  out of the identity and a renamed folder still resolves the same.
+- **Presentation packages are excluded**, as MOD-SDK-013 already decided: their
+  scripts do not reach the simulation, and `+ReloadPresentation` exists to
+  change them mid-game. A presentation package carrying a hash is refused, so
+  the exclusion cannot be got round by accident.
+
+### Where it is checked
+
+- `ModLaunchPackage::entrySha256` goes into saves and replays.
+  `describeModSetMismatch` names a script-only difference as such ("has a
+  different script") rather than falling back to the generic identity message.
+- `readVerifiedModScript` is now the one reader for simulation scripts: the
+  pre-match transform, the runtime hooks and the Lua AI. It refuses a package
+  with no recorded hash and a file whose bytes no longer match, naming the
+  package, so an edit between resolving and loading cannot run unnoticed.
+  `rwe_setup --preview-mods` uses it as well, and now previews only the
+  packages the loader would transform with (pre-match mutators), where it used
+  to run every package's script as a transform. The presentation reader is
+  left as it was, on purpose.
+- The launcher's mod fingerprint gains `manifest.entry` (`path`, `size`,
+  `hash`) for a format-1, non-presentation manifest whose entry passes the
+  engine's own path rule (`isValidEntryPath`, mirroring `validEntryPath`). The
+  lobby and the game server compare it, the refusal names the script file
+  rather than `rwe_mod.json`, and the game server validates the reported path
+  and hash. The lobby digest covers it too.
+
+### Compatibility
+
+- A save or replay recorded before this change carries a format-1 identity,
+  which no current launch reproduces, so it is refused with the existing
+  identity message rather than loaded. Saves without mods are unaffected.
+- A peer on an older launcher reports no `entry`; against a scripted mod that
+  is a difference, so the game does not start. This matches MOD-SDK-006's
+  existing rule for a peer that reports no manifest.
+
+### Still not covered
+
+- Loose content files and archives other than the entry script. Format 1 has
+  no `require` and no declared content-file list, so the entry is the only Lua a
+  package can run; anything that adds modules or declared files must extend
+  this identity before it ships.
+- The full resolved-set identity on the multiplayer wire (#979). The engine's
+  identity now covers scripts, and the launcher's fingerprint does separately,
+  but the two are not yet the same value.
+
 ## Verification
 
 Executed 2026-11-02: `rwe_test "[modsdk]"` and the full `rwe_test` suite; the
@@ -750,8 +822,8 @@ JSON, and exits non-zero with the specific error when a set cannot load.
 ## Deferred, and explicitly not claimed
 
 - Archive-embedded manifests, TDF adapters and ADR-0002 D4 reconciliation.
-- Content hashing of entry scripts, loose files and archives into the identity
-  (MOD-03/MOD-05).
+- Content hashing of loose files and archives into the identity (MOD-03).
+  Entry scripts are covered by MOD-SDK-014.
 - Lua or wasm execution, sandboxing, determinism and fault policy (MOD-04).
 - Save, replay and multiplayer carrying the identity (MOD-06).
 - Launcher Library presentation and author commands (MOD-07).
