@@ -360,7 +360,9 @@ namespace rwe
         // Version 3 adds counted, ordered fire state (BT-255).
         // Version 4 adds the mod state. A game without one still writes 3,
         // so an unmodded save keeps the format its older readers know.
-        j["version"] = sim.modState() ? 4 : 3;
+        // A scripted AI seat's state (MOD-SDK-021) is mod state as well.
+        const auto aiStates = aiControllerStates(sim.aiControllers);
+        j["version"] = sim.modState() || !aiStates.is_null() ? 4 : 3;
 
         // The wind range is a construction-time constant; it travels with the
         // save only so the load can check it was given the right map.
@@ -411,6 +413,10 @@ namespace rwe
         if (const auto* provider = sim.windProvider())
         {
             j["windProvider"] = provider->id();
+        }
+        if (!aiStates.is_null())
+        {
+            j["aiStates"] = aiStates;
         }
         if (const auto* runtime = sim.modRuntime())
         {
@@ -661,6 +667,13 @@ namespace rwe
                 throw std::runtime_error("save carries mod runtime state but no runtime is resolved");
             }
             sim.modRuntime()->loadJson(j.at("modRuntime"));
+        }
+        // The controllers were built by the loader before the save was
+        // read; their state comes back into them in place. A save from
+        // before MOD-SDK-021 has none, and a Lua seat then starts afresh.
+        if (j.contains("aiStates"))
+        {
+            loadAiControllerStates(sim.aiControllers, j.at("aiStates"));
         }
 
         // The fresh sim has the map's initial features standing. Sweep them

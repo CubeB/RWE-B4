@@ -286,6 +286,12 @@ mixed-seat delayed-packet and cross-build acceptance runs; replay using a
 recorded stream without a second producer; and assigning a specific AI package
 to a specific seat. **MOD-09 is not complete.**
 
+Progress 2026-11-04 (#971, local, not yet compiled): a Lua seat's RNG
+position, fault flag and `ai.store` survive a save, are hashed and appear in
+desync dumps, through new `AiController::saveState/loadState/stateHash`.
+Native seats still rebuild on load. Recorded in MOD-SDK-021. Rejoin, replay
+without a second producer and the acceptance runs remain open.
+
 ### MOD-10: Expose presentation safely
 
 Dependencies: MOD-02 and the runtime boundary; may progress alongside MOD-08.

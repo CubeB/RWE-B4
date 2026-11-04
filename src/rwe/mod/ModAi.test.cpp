@@ -2,6 +2,8 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <nlohmann/json.hpp>
+#include <rwe/ai/AiController.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/mod/ModAiController.h>
 #include <rwe/mod/ModAiScript.h>
@@ -9,6 +11,7 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/util/Sha256.h>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -467,5 +470,108 @@ namespace rwe
 
         std::error_code ec;
         fs::remove(path, ec);
+    }
+
+    namespace
+    {
+        const char* const persistentSource = R"(
+            function on_tick(tick)
+                local n = (ai.store_get("n") or 0) + 1
+                ai.store_set("n", n)
+                for _, unit in ipairs(ai.my_units()) do
+                    ai.cmd_move(unit.id, n * 10, ai.rand_below(100))
+                end
+            end
+        )";
+
+        std::vector<std::string> runTicks(ModAiController& controller, World& world, unsigned int from, unsigned int to)
+        {
+            std::vector<std::string> output;
+            for (unsigned int tick = from; tick <= to; ++tick)
+            {
+                world.sim.gameTime = GameTime(tick);
+                std::vector<PlayerCommand> commands;
+                controller.tick(world.sim, commands);
+                for (const auto& command : commands)
+                {
+                    output.push_back(std::to_string(tick) + " " + describe(command));
+                }
+            }
+            return output;
+        }
+    }
+
+    TEST_CASE("a scripted seat's store and random stream survive a save", "[modai][modsdk]")
+    {
+        World world;
+        auto original = controllerFor(world.owner, persistentSource);
+        runTicks(*original, world, 1, 5);
+        REQUIRE_FALSE(original->disabled());
+
+        const auto saved = original->saveState();
+        CHECK(saved["format"] == "rwe.lua-ai");
+
+        auto resumed = controllerFor(world.owner, persistentSource);
+        resumed->loadState(saved);
+        CHECK(resumed->stateHash() == original->stateHash());
+
+        // A seat that was never told its state starts its count again and
+        // draws from the start of its stream: the state really is what
+        // decides the next commands.
+        auto forgetful = controllerFor(world.owner, persistentSource);
+
+        const auto uninterrupted = runTicks(*original, world, 6, 10);
+        const auto afterResume = runTicks(*resumed, world, 6, 10);
+        const auto withoutState = runTicks(*forgetful, world, 6, 10);
+        REQUIRE_FALSE(uninterrupted.empty());
+        CHECK(afterResume == uninterrupted);
+        CHECK(withoutState != uninterrupted);
+        CHECK(resumed->stateHash() == original->stateHash());
+    }
+
+    TEST_CASE("a saved seat state is refused unless it is this seat's", "[modai][modsdk]")
+    {
+        World world;
+        auto controller = controllerFor(world.owner, persistentSource);
+        auto state = controller->saveState();
+
+        auto otherPackage = state;
+        otherPackage["package"] = "com.example.other";
+        CHECK_THROWS_AS(controller->loadState(otherPackage), std::runtime_error);
+
+        auto badRandom = state;
+        badRandom["rng"] = "not a number";
+        CHECK_THROWS_AS(controller->loadState(badRandom), std::runtime_error);
+
+        CHECK_THROWS_AS(controller->loadState(nlohmann::json{{"format", "rwe.lua-ai"}, {"version", 2}}), std::runtime_error);
+        CHECK_FALSE(controller->disabled());
+
+        // A seat saved disabled resumes disabled.
+        auto disabled = state;
+        disabled["disabled"] = true;
+        controller->loadState(disabled);
+        CHECK(controller->disabled());
+    }
+
+    TEST_CASE("scripted seat states save in player order, only when present", "[modai][modsdk]")
+    {
+        World world;
+        AiControllerMap controllers;
+        CHECK(aiControllerStates(controllers).is_null());
+        CHECK(aiControllerStatesHash(controllers).empty());
+
+        controllers[world.other] = controllerFor(world.other, persistentSource);
+        controllers[world.owner] = controllerFor(world.owner, persistentSource);
+        const auto states = aiControllerStates(controllers);
+        REQUIRE(states.is_array());
+        REQUIRE(states.size() == 2);
+        CHECK(states[0]["player"].get<unsigned int>() < states[1]["player"].get<unsigned int>());
+        CHECK_FALSE(aiControllerStatesHash(controllers).empty());
+
+        loadAiControllerStates(controllers, states);
+
+        AiControllerMap missingSeat;
+        missingSeat[world.owner] = controllerFor(world.owner, persistentSource);
+        CHECK_THROWS_AS(loadAiControllerStates(missingSeat, states), std::runtime_error);
     }
 }

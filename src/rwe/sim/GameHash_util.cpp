@@ -1,5 +1,6 @@
 ﻿#include "GameHash_util.h"
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/ai/AiController.h>
 #include <rwe/mod/ModRuntime.h>
 #include <rwe/sim/EconomyProvider.h>
 #include <rwe/sim/WindProvider.h>
@@ -490,6 +491,14 @@ namespace rwe
 
     namespace
     {
+        // Nothing for a game whose seats are all native, so its hash is what
+        // it always was.
+        GameHash computeHashOfAiStates(const GameSimulation& simulation)
+        {
+            const auto combined = aiControllerStatesHash(simulation.aiControllers);
+            return combined.empty() ? GameHash(0) : computeHashOf(combined);
+        }
+
         /**
          * Only entries naming a unit that still exists: a unit gone since the
          * list was built can never match again, and a save does not carry it,
@@ -569,6 +578,9 @@ namespace rwe
             // so existing hashes are unchanged.
             simulation.modState() ? computeHashOf(simulation.modState()->hash()) : GameHash(0),
             simulation.modRuntime() ? computeHashOf(simulation.modRuntime()->hash()) : GameHash(0),
+            // MOD-SDK-021: a scripted seat's RNG position, fault flag and
+            // store decide its future commands. Native seats add nothing.
+            computeHashOfAiStates(simulation),
             simulation.economyProvider() ? computeHashOf(simulation.economyProvider()->id()) : GameHash(0),
             simulation.windProvider() ? computeHashOf(simulation.windProvider()->id()) : GameHash(0));
     }

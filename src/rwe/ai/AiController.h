@@ -3,7 +3,11 @@
 #include <rwe/ai/AiEngine.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/game/PlayerCommand.h>
+#include <memory>
+#include <nlohmann/json_fwd.hpp>
 #include <rwe/sim/PlayerId.h>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace rwe
@@ -46,5 +50,34 @@ namespace rwe
          * arena report, the debug panel); null for any other engine.
          */
         virtual const AiPlayerController* asRweController() const { return nullptr; }
+
+        /**
+         * State that decides this controller's future commands and has to
+         * survive a save (MOD-SDK-021). Null for an engine that rebuilds on
+         * load, which the native engines do by design
+         * (docs/ai-architecture-proposal.md, placement B).
+         */
+        virtual nlohmann::json saveState() const;
+
+        /** Restores what saveState wrote; throws std::runtime_error if it cannot. */
+        virtual void loadState(const nlohmann::json& state);
+
+        /** A digest of saveState for the sync hash, or empty when there is none. */
+        virtual std::string stateHash() const;
     };
+
+    using AiControllerMap = std::unordered_map<PlayerId, std::unique_ptr<AiController>>;
+
+    /**
+     * MOD-SDK-021. Every controller's saveState, as [{player, state}] in
+     * player order, or null when none keeps any -- so a game with only
+     * native engines saves exactly what it did before.
+     */
+    nlohmann::json aiControllerStates(const AiControllerMap& controllers);
+
+    /** Restores what aiControllerStates wrote, refusing a seat that is missing. */
+    void loadAiControllerStates(AiControllerMap& controllers, const nlohmann::json& states);
+
+    /** A digest of every controller's stateHash in player order; empty when none keeps state. */
+    std::string aiControllerStatesHash(const AiControllerMap& controllers);
 }

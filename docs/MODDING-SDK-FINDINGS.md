@@ -1085,6 +1085,65 @@ ownership, placement) and are not attempted here.
 
 Still open for #970: more effect kinds and the two-peer acceptance run.
 
+## MOD-SDK-021: a scripted AI seat survives a save
+
+Status: implemented 2026-11-04 on `970-shield-example`. Issue #971, first
+slice. RWE-original; no byte-tactics comparison applies. Not compiled
+locally; CI is the build. Depends on #984, which keeps a loaded game's
+runtime store alive; that fix is needed for the runtime, not for this.
+
+The native engines rebuild on load by design (`ai-architecture-proposal.md`,
+placement B, and the open ROADMAP entry on AI serialization). #971 asks more
+of a Lua seat: its plans, timers and random position must survive, so that a
+resumed game makes the same decisions as an uninterrupted one.
+
+### The contract
+
+- `AiController` gains `saveState()`, `loadState()` and `stateHash()`. The
+  defaults say "no state": native seats save nothing and hash nothing, so a
+  game without Lua seats saves and hashes exactly as before, and a save
+  claiming state for a native seat is refused.
+- A Lua seat saves its RNG position, its fault flag and its own store as
+  `rwe.lua-ai` version 1. The store is a `ModStateStore` private to the seat,
+  reached through `ai.store_get(key)` and `ai.store_set(key, value)` with the
+  runtime's value rules (the shared `ModLuaValues` helpers). It is the seat's
+  own, not the simulation's, because `AiController::tick` sees the simulation
+  as const.
+- **Lua variables are not saved.** A resumed seat runs its script's top level
+  again, so a script keeps anything that must survive -- plans, timers,
+  targets -- in `ai.store`. The random stream carries on from its saved
+  position.
+- A state saved for another package, or malformed, is refused before
+  anything changes. A seat saved disabled resumes disabled.
+
+### Where it goes
+
+- `save_util.cpp` writes `aiStates`, `[{player, state}]` in player order,
+  only when some seat has state, and raises the save version to 4 then. The
+  load restores them into the controllers the loader built, after the rest of
+  the simulation. A save from before this has no `aiStates`, and a Lua seat
+  then starts afresh, as it did before.
+- `GameHash_util.cpp` folds a digest of the states in player order (nothing
+  for all-native games). `dump_util.cpp` writes them for desync reports.
+- The free functions `aiControllerStates`, `loadAiControllerStates` and
+  `aiControllerStatesHash` sit beside `AiController`, so neither `sim/` nor
+  `game/` grows a dependency on the other.
+
+### Evidence
+
+`[modai][modsdk]`: a seat run five ticks, saved and restored into a fresh
+seat, produces the same commands and state hash as the uninterrupted seat
+over the next five ticks. A fresh seat without the state does not, which is
+what shows the state is doing the work. Plus refusal of foreign and malformed
+states, and player-ordered save/load of several seats.
+
+### Still open for #971
+
+Rejoin: transferring a seat's state to a rejoining peer, or showing that a
+deterministic reconstruction reaches the same future. Replay with a recorded
+stream and no second producer. The two-peer delayed-packet and cross-build
+acceptance runs. Assigning a specific package to a specific seat.
+
 ## Verification
 
 Executed 2026-11-02: `rwe_test "[modsdk]"` and the full `rwe_test` suite; the

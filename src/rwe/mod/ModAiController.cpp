@@ -1,6 +1,8 @@
 #include "ModAiController.h"
 
 #include "ModAiScript.h"
+#include "ModLuaValues.h"
+#include <rwe/mod/ModStateStore.h>
 
 #include <algorithm>
 #include <cmath>
@@ -192,6 +194,10 @@ namespace rwe
             lua_setfield(state, -2, "rand_below");
             lua_pushcfunction(state, tickFunction);
             lua_setfield(state, -2, "tick");
+            lua_pushcfunction(state, storeGetFunction);
+            lua_setfield(state, -2, "store_get");
+            lua_pushcfunction(state, storeSetFunction);
+            lua_setfield(state, -2, "store_set");
             lua_setglobal(state, "ai");
 
             // Load the package. A script that does not load is a broken
@@ -349,6 +355,43 @@ namespace rwe
             impl->remaining -= hookInstructionCount;
         }
 
+        // ai.store_get(key) -> value or nil, from this seat's own store.
+        static int storeGetFunction(lua_State* state)
+        {
+            auto* impl = current(state);
+            std::size_t keyLength = 0;
+            const char* keyText = luaL_checklstring(state, 1, &keyLength);
+            pushModLuaValue(state, impl->store.getGlobal(impl->packageId, std::string(keyText, keyLength)));
+            return 1;
+        }
+
+        // ai.store_set(key, value). The seat's store is saved and hashed
+        // (MOD-SDK-021); a Lua variable is neither.
+        static int storeSetFunction(lua_State* state)
+        {
+            auto* impl = current(state);
+            std::size_t keyLength = 0;
+            const char* keyText = luaL_checklstring(state, 1, &keyLength);
+            const auto kind = modLuaValueKind(state, 2);
+            if (kind == ModLuaValueKind::Invalid)
+            {
+                return luaL_error(state, "store_set value must be a number, string or boolean");
+            }
+            if (kind == ModLuaValueKind::NonFinite)
+            {
+                return luaL_error(state, "store_set value must be finite");
+            }
+            bool stored = false;
+            {
+                stored = impl->store.setGlobal(impl->packageId, std::string(keyText, keyLength), modLuaValueAt(state, 2, kind));
+            }
+            if (!stored)
+            {
+                return luaL_error(state, "store quota exceeded");
+            }
+            return 0;
+        }
+
         static int tickFunction(lua_State* state)
         {
             lua_pushinteger(state, static_cast<lua_Integer>(current(state)->currentTick));
@@ -465,6 +508,9 @@ namespace rwe
         std::uint64_t remaining = 0;
         std::minstd_rand rng;
         bool disabledFlag = false;
+        // The seat's persistent state (MOD-SDK-021). Its own, not the
+        // simulation's: tick() sees the simulation as const.
+        ModStateStore store;
         std::string lastErrorText;
         std::vector<std::string> logLines;
         unsigned int currentTick = 0;
@@ -510,5 +556,55 @@ namespace rwe
         std::ostringstream text;
         text << impl_->rng;
         return text.str();
+    }
+
+    nlohmann::json ModAiController::saveState() const
+    {
+        return nlohmann::json{
+            {"format", "rwe.lua-ai"},
+            {"version", 1},
+            {"package", impl_->packageId},
+            {"rng", rngState()},
+            {"disabled", impl_->disabledFlag},
+            {"store", impl_->store.toJson()},
+        };
+    }
+
+    void ModAiController::loadState(const nlohmann::json& state)
+    {
+        if (!state.is_object() || state.value("format", std::string()) != "rwe.lua-ai" || state.value("version", 0) != 1)
+        {
+            throw std::runtime_error("lua ai: not a version-1 seat state");
+        }
+        if (state.value("package", std::string()) != impl_->packageId)
+        {
+            throw std::runtime_error("lua ai: the saved seat played " + state.value("package", std::string())
+                + ", this seat plays " + impl_->packageId);
+        }
+        if (!state.contains("rng") || !state["rng"].is_string() || !state.contains("disabled")
+            || !state["disabled"].is_boolean() || !state.contains("store"))
+        {
+            throw std::runtime_error("lua ai: the saved seat state is incomplete");
+        }
+        std::minstd_rand rng;
+        std::istringstream text(state["rng"].get<std::string>());
+        text >> rng;
+        if (text.fail())
+        {
+            throw std::runtime_error("lua ai: the saved random state does not parse");
+        }
+        // The store's own load is transactional; the rest is assigned only
+        // once everything has parsed, so a bad state changes nothing.
+        impl_->store.loadJson(state["store"]);
+        impl_->rng = rng;
+        if (state["disabled"].get<bool>())
+        {
+            impl_->disable("disabled before the game was saved");
+        }
+    }
+
+    std::string ModAiController::stateHash() const
+    {
+        return sha256Hex(saveState().dump());
     }
 }

@@ -752,6 +752,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/resource_io.h
     src/rwe/rwe_time.cpp
     src/rwe/rwe_time.h
+    src/rwe/mod/ModLuaValues.cpp
+    src/rwe/mod/ModLuaValues.h
     src/rwe/mod/ModLaunch.cpp
     src/rwe/mod/ModLaunch.h
     src/rwe/mod/ModTransform.cpp

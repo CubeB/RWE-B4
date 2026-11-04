@@ -1,4 +1,5 @@
 #include "ModRuntime.h"
+#include "ModLuaValues.h"
 
 #include <algorithm>
 #include <cmath>
@@ -282,75 +283,6 @@ namespace rwe
             return 0;
         }
 
-        // Reads argument `index` as a store value without creating any C++
-        // object, so a refusal can raise a Lua error safely: Lua is built as
-        // C, and luaL_error longjmps past C++ destructors.
-        enum class ValueKind
-        {
-            Invalid,
-            NonFinite,
-            Boolean,
-            Number,
-            Text,
-        };
-
-        static ValueKind valueKind(lua_State* state, int index)
-        {
-            if (lua_isboolean(state, index))
-            {
-                return ValueKind::Boolean;
-            }
-            if (lua_type(state, index) == LUA_TNUMBER)
-            {
-                return std::isfinite(static_cast<float>(lua_tonumber(state, index))) ? ValueKind::Number
-                                                                                       : ValueKind::NonFinite;
-            }
-            if (lua_type(state, index) == LUA_TSTRING)
-            {
-                return ValueKind::Text;
-            }
-            return ValueKind::Invalid;
-        }
-
-        static ModValue valueAt(lua_State* state, int index, ValueKind kind)
-        {
-            switch (kind)
-            {
-            case ValueKind::Boolean:
-                return ModValue::integer(lua_toboolean(state, index) ? 1 : 0);
-            case ValueKind::Number:
-                return ModValue::number(static_cast<float>(lua_tonumber(state, index)));
-            default:
-            {
-                std::size_t length = 0;
-                const char* text = lua_tolstring(state, index, &length);
-                return ModValue::text(std::string(text, length));
-            }
-            }
-        }
-
-        static void pushValue(lua_State* state, const std::optional<ModValue>& value)
-        {
-            if (!value)
-            {
-                lua_pushnil(state);
-                return;
-            }
-            switch (value->type)
-            {
-            case ModValueType::I32:
-                lua_pushinteger(state, value->i32);
-                break;
-            case ModValueType::F32:
-                lua_pushnumber(state, value->f32);
-                break;
-            case ModValueType::String:
-            case ModValueType::Bytes:
-                lua_pushlstring(state, value->bytes.data(), value->bytes.size());
-                break;
-            }
-        }
-
         static bool unitIdAt(lua_State* state, int index, UnitId& out)
         {
             if (!lua_isinteger(state, index))
@@ -374,7 +306,7 @@ namespace rwe
             auto* impl = context->impl;
             std::size_t keyLength = 0;
             const char* keyText = luaL_checklstring(state, 1, &keyLength);
-            pushValue(state,
+            pushModLuaValue(state,
                 impl->store->getGlobal(impl->packages[context->index].spec.id, std::string(keyText, keyLength)));
             return 1;
         }
@@ -387,19 +319,19 @@ namespace rwe
             auto* impl = context->impl;
             std::size_t keyLength = 0;
             const char* keyText = luaL_checklstring(state, 1, &keyLength);
-            const auto kind = valueKind(state, 2);
-            if (kind == ValueKind::Invalid)
+            const auto kind = modLuaValueKind(state, 2);
+            if (kind == ModLuaValueKind::Invalid)
             {
                 return luaL_error(state, "store_set value must be a number, string or boolean");
             }
-            if (kind == ValueKind::NonFinite)
+            if (kind == ModLuaValueKind::NonFinite)
             {
                 return luaL_error(state, "store_set value must be finite");
             }
             bool stored = false;
             {
                 stored = impl->store->setGlobal(
-                    impl->packages[context->index].spec.id, std::string(keyText, keyLength), valueAt(state, 2, kind));
+                    impl->packages[context->index].spec.id, std::string(keyText, keyLength), modLuaValueAt(state, 2, kind));
             }
             if (!stored)
             {
@@ -503,7 +435,7 @@ namespace rwe
             }
             std::size_t keyLength = 0;
             const char* keyText = luaL_checklstring(state, 2, &keyLength);
-            pushValue(state,
+            pushModLuaValue(state,
                 impl->store->getUnit(impl->packages[context->index].spec.id, unit, std::string(keyText, keyLength)));
             return 1;
         }
@@ -522,12 +454,12 @@ namespace rwe
             }
             std::size_t keyLength = 0;
             const char* keyText = luaL_checklstring(state, 2, &keyLength);
-            const auto kind = valueKind(state, 3);
-            if (kind == ValueKind::Invalid)
+            const auto kind = modLuaValueKind(state, 3);
+            if (kind == ModLuaValueKind::Invalid)
             {
                 return luaL_error(state, "unit_set value must be a number, string or boolean");
             }
-            if (kind == ValueKind::NonFinite)
+            if (kind == ModLuaValueKind::NonFinite)
             {
                 return luaL_error(state, "unit_set value must be finite");
             }
@@ -540,7 +472,7 @@ namespace rwe
                 stored = impl->store->setUnit(impl->packages[context->index].spec.id,
                     unit,
                     std::string(keyText, keyLength),
-                    valueAt(state, 3, kind));
+                    modLuaValueAt(state, 3, kind));
             }
             if (!stored)
             {

@@ -1,5 +1,6 @@
 ﻿#include "dump_util.h"
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/ai/AiController.h>
 #include <rwe/mod/ModRuntime.h>
 #include <rwe/sim/EconomyProvider.h>
 #include <rwe/sim/WindProvider.h>
@@ -680,6 +681,10 @@ namespace rwe
         if (const auto* runtime = simulation.modRuntime())
         {
             j["modRuntime"] = runtime->toJson();
+        }
+        if (auto aiStates = aiControllerStates(simulation.aiControllers); !aiStates.is_null())
+        {
+            j["aiStates"] = std::move(aiStates);
         }
         if (const auto* provider = simulation.economyProvider())
         {
