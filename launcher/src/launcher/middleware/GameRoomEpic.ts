@@ -26,7 +26,7 @@ import {
   RweArgsPlayerSlot,
 } from "../rwe";
 import { assertNever, masterServer, choose } from "../../common/util";
-import { resourceDirectoriesForMods } from "../../common/mods";
+import { modArgs, resourceDirectoriesForMods } from "../../common/mods";
 import { EpicDependencies } from "./EpicDependencies";
 import { ReceiveCreateGameResponseAction } from "../masterClient/actions";
 
@@ -82,6 +82,7 @@ export function rweArgsFromCurrentGameState(
   return {
     dataPaths: selectedMods.map(x => x.path),
     resourceDirectories: resourceSelection.resourceDirectories,
+    ...modArgs(selectedMods),
     map: game.mapName,
     port: 6670 + portOffset,
     players: playersArgs,

@@ -206,7 +206,8 @@ Windows/Linux network acceptance run.
 
 Progress 2026-11-04 (local, not yet compiled): "play it" now has a path that
 needs no launcher work: `rwe --map <name> --mod <rwe_mod.json>` (MOD-SDK-015).
-The launcher still has to pass it.
+The launcher now lists format-1 packages, archives or not, and passes each
+selected one as `--mod` (MOD-SDK-022).
 
 ### MOD-08: Introduce runtime rules and authoritative script state
 

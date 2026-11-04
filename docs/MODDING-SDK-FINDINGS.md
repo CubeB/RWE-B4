@@ -1144,6 +1144,44 @@ deterministic reconstruction reaches the same future. Replay with a recorded
 stream and no second producer. The two-peer delayed-packet and cross-build
 acceptance runs. Assigning a specific package to a specific seat.
 
+## MOD-SDK-022: the launcher passes format-1 packages to the engine
+
+Status: implemented 2026-11-04 on `970-shield-example`. Part of #979's
+groundwork. RWE-original. **Verified locally**: launcher `tsc` clean, ESLint
+with only the existing unrelated warning, Jest 15 suites and 179 tests (2
+new).
+
+Two gaps sat between the engine's `--mod` (MOD-SDK-015) and a game started
+from the launcher:
+
+- The launcher recognised only the legacy descriptor, which carries a
+  `shortname`. A format-1 manifest has `manifestVersion` and `id` instead, so
+  the launcher never read it. A package with no archives -- which is what a
+  runtime or AI package usually is, a manifest and a script -- was not listed
+  at all. All three shipped examples were in that state.
+- Nothing ever passed `--mod`, so even a listed package only added its data
+  paths and its scripts never ran.
+
+Now `getInstalledMods` lists a folder whose `rwe_mod.json` is a format-1
+manifest (`isFormatOneManifest`: a numeric `manifestVersion` and a non-empty
+`id`), with or without archives, and records the manifest path as
+`modManifest`. Both launch paths -- the local "launch" and the multiplayer
+room's `GameRoomEpic` -- pass every selected package's manifest as `--mod`,
+through `modArgs`, which adds no key at all for a selection of legacy
+packages, so those launch exactly as before. Load order is the engine's, from
+the manifests.
+
+A format-1 package's `resourceDirectories` are not read by the launcher. The
+engine applies them from the manifest through `applyModResourceDirectories`,
+and the launcher's legacy key names (`builderGuis`) are not the manifest's
+(`weapons`), so reading both would apply one package's roots under two
+vocabularies.
+
+The lobby still compares archives, manifest bytes and entry scripts
+(MOD-SDK-006, MOD-SDK-014), not the engine's resolved identity, which a
+player could still differ on through `--mod-option`. Exchanging that identity
+is the rest of #979.
+
 ## Verification
 
 Executed 2026-11-02: `rwe_test "[modsdk]"` and the full `rwe_test` suite; the
