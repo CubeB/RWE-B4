@@ -208,6 +208,10 @@ Progress 2026-11-04 (local, not yet compiled): "play it" now has a path that
 needs no launcher work: `rwe --map <name> --mod <rwe_mod.json>` (MOD-SDK-015).
 The launcher now lists format-1 packages, archives or not, and passes each
 selected one as `--mod` (MOD-SDK-022).
+"Share it" waits on package installation (#765, PACKAGE-007): `rwe_setup`'s
+`--install-package` is still a placeholder, so an exported archive would have
+nothing on the receiving side to install it. Packaging belongs with that work,
+not ahead of it.
 
 ### MOD-08: Introduce runtime rules and authoritative script state
 
