@@ -1,6 +1,6 @@
 #include "ModLuaValues.h"
 
-#include <cmath>
+#include <limits>
 #include <string>
 
 extern "C"
@@ -18,8 +18,15 @@ namespace rwe
         }
         if (lua_type(state, index) == LUA_TNUMBER)
         {
-            return std::isfinite(static_cast<float>(lua_tonumber(state, index))) ? ModLuaValueKind::Number
-                                                                                   : ModLuaValueKind::NonFinite;
+            // Decided on the Lua double, by comparison alone: NaN is the one
+            // value unequal to itself, and anything beyond FLT_MAX would
+            // become an infinity as an f32. No library classification is
+            // relied on, so no floating-point mode can let a NaN through
+            // (MSVC Release, MOD-SDK-016).
+            const lua_Number number = lua_tonumber(state, index);
+            const auto largest = static_cast<lua_Number>(std::numeric_limits<float>::max());
+            const bool finite = number == number && number <= largest && number >= -largest;
+            return finite ? ModLuaValueKind::Number : ModLuaValueKind::NonFinite;
         }
         if (lua_type(state, index) == LUA_TSTRING)
         {
