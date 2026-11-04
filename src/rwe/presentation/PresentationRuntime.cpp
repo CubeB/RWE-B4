@@ -7,12 +7,10 @@
 #include <stdexcept>
 #include <utility>
 
-extern "C"
-{
+// Lua is built as C++ (MOD-SDK-023), so its headers are included as C++.
 #include <lauxlib.h>
 #include <lua.h>
 #include <lualib.h>
-}
 
 namespace rwe
 {

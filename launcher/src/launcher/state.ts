@@ -47,6 +47,10 @@ export interface InstalledModInfo {
   path: string;
   resourceDirectories?: ResourceDirectories;
   resourceDirectoryError?: string;
+  /** A format-1 manifest to pass as `--mod` (MOD-SDK-022). */
+  modManifest?: string;
+  /** Display only: the manifest's kind and version. */
+  summary?: string;
 }
 
 export interface VideoMode {

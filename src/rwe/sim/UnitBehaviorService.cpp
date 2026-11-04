@@ -6268,6 +6268,7 @@ namespace rwe
                 if (targetUnit.addBuildProgress(targetUnitDefinition, unitInfo.definition->workerTimePerTick))
                 {
                     sim->events.push_back(UnitCompleteEvent{state.targetUnit->first});
+                    sim->notifyModUnitCompleted(state.targetUnit->first);
 
                     if (targetUnitDefinition.activateWhenBuilt)
                     {
@@ -6987,6 +6988,7 @@ namespace rwe
         if (targetUnit.addBuildProgress(targetUnitDefinition, unitInfo.definition->workerTimePerTick))
         {
             sim->events.push_back(UnitCompleteEvent{targetUnitId});
+            sim->notifyModUnitCompleted(targetUnitId);
 
             if (targetUnitDefinition.activateWhenBuilt)
             {

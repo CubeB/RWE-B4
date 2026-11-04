@@ -29,7 +29,7 @@ namespace rwe
 
     const std::vector<std::string>& supportedModFeatures()
     {
-        static const std::vector<std::string> features = {"transform.definitions@1", "runtime.damage@1"};
+        static const std::vector<std::string> features = {"transform.definitions@1", "runtime.damage@1", "runtime.unit-state@1", "runtime.lifecycle@1", "runtime.unit-query@1", "runtime.effects@1"};
         return features;
     }
 

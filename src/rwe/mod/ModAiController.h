@@ -41,9 +41,9 @@ namespace rwe
      * foreign unit) disables its seat for the rest of the match and emits
      * nothing for that tick, exactly as ModRuntime disables a faulty package.
      *
-     * Not yet implemented: the private Lua heap, plan and RNG position are not
-     * part of the save or rejoin contract, so save/resume of a Lua seat is not
-     * claimed. The save header records the engine name only.
+     * Save/resume (MOD-SDK-021): the RNG position, the fault flag and the
+     * seat's ai.store survive a save. The Lua heap does not, so a script
+     * keeps its plans and timers in ai.store. Rejoin is not yet claimed.
      */
     class ModAiController final : public AiController
     {
@@ -78,6 +78,13 @@ namespace rwe
 
         /** The controller's private random stream, for diagnostics and a future save. */
         std::string rngState() const;
+
+        // MOD-SDK-021: the seat's RNG position, its fault flag and its
+        // ai.store entries. Lua variables are not part of it: a script keeps
+        // what it needs across a save in ai.store.
+        nlohmann::json saveState() const override;
+        void loadState(const nlohmann::json& state) override;
+        std::string stateHash() const override;
 
     private:
         class Impl;

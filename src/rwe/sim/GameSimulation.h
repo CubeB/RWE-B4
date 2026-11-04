@@ -874,6 +874,17 @@ namespace rwe
         ModRuntime* modRuntime() { return modRuntime_.get(); }
         const ModRuntime* modRuntime() const { return modRuntime_.get(); }
         void setModRuntime(std::unique_ptr<ModRuntime> runtime);
+        // Binds this simulation to the runtime before a dispatch: the tick,
+        // and the unit queries a script may make (ModRuntime::bind).
+        void bindModRuntime();
+        // Applies the effects runtime mods queued this tick (MOD-SDK-020).
+        void applyModEffects();
+        // MOD-SDK-017: unit lifecycle events for runtime mods. Each does
+        // nothing without a runtime. Public because UnitBehaviorService
+        // completes units on the simulation's behalf.
+        void notifyModUnitCreated(UnitId unit);
+        void notifyModUnitCompleted(UnitId unit);
+        void notifyModUnitKilled(UnitId unit, std::optional<UnitId> attacker);
         EconomyProvider* economyProvider() { return economyProvider_.get(); }
         const EconomyProvider* economyProvider() const { return economyProvider_.get(); }
         void setEconomyProvider(std::unique_ptr<EconomyProvider> provider);

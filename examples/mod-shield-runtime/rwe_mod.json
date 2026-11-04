@@ -1,0 +1,15 @@
+{
+  "manifestVersion": 1,
+  "id": "com.example.shield",
+  "name": "Regenerating shield",
+  "version": "1.0.0",
+  "kind": "mutator",
+  "api": 1,
+  "entry": "scripts/main.lua",
+  "features": ["runtime.damage@1", "runtime.unit-state@1"],
+  "exclusive": ["hook.damage.v1"],
+  "options": [
+    {"key": "capacity", "type": "number", "default": 200, "min": 0, "max": 100000},
+    {"key": "regen_per_tick", "type": "number", "default": 1, "min": 0, "max": 10000}
+  ]
+}

@@ -37,7 +37,15 @@ add_library(rwe_lua STATIC
     lzio.c)
 
 target_include_directories(rwe_lua PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-set_target_properties(rwe_lua PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
+# Compiled as C++, not C (MOD-SDK-023). Lua then raises errors as C++
+# exceptions (ldo.c's LUAI_THROW), so an error raised from an RWE host
+# function -- which is C++ -- unwinds its frames properly. Built as C, the
+# same error is a longjmp across C++ frames, which is undefined behaviour and
+# killed MSVC Release test runs. No Lua source file changes for this, and
+# every RWE file includes the Lua headers without extern "C".
+get_target_property(RWE_LUA_SOURCES rwe_lua SOURCES)
+set_source_files_properties(${RWE_LUA_SOURCES} PROPERTIES LANGUAGE CXX)
+set_target_properties(rwe_lua PROPERTIES LINKER_LANGUAGE CXX)
 
 if(MSVC)
     # Lua is C and predates MSVC's stricter CRT deprecation warnings.

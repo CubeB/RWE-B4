@@ -290,6 +290,100 @@ namespace rwe
         modRuntime_ = std::move(runtime);
     }
 
+    namespace
+    {
+        bool modRuntimeUnitExists(const void* simulation, UnitId unit)
+        {
+            return static_cast<const GameSimulation*>(simulation)->unitExists(unit);
+        }
+
+        bool modRuntimeUnitInfo(const void* simulation, UnitId unit, ModUnitInfo& info)
+        {
+            const auto& sim = *static_cast<const GameSimulation*>(simulation);
+            const auto found = sim.tryGetUnitState(unit);
+            if (!found)
+            {
+                return false;
+            }
+            const auto& state = found->get();
+            const auto& definition = sim.unitDefinitions.at(state.unitType);
+            info.owner = state.owner;
+            info.unitType = state.unitType;
+            info.hitPoints = state.hitPoints;
+            info.maxHitPoints = definition.maxHitPoints;
+            info.complete = !state.isBeingBuilt(definition);
+            info.dead = state.isDead();
+            info.x = simScalarToFloat(state.position.x);
+            info.y = simScalarToFloat(state.position.y);
+            info.z = simScalarToFloat(state.position.z);
+            return true;
+        }
+    }
+
+    void GameSimulation::applyModEffects()
+    {
+        if (!modRuntime_)
+        {
+            return;
+        }
+        for (const auto& effect : modRuntime_->takeEffects())
+        {
+            // Checked again here, not only when queued: the unit may have
+            // died, or its slot been reused, since. A stale effect is
+            // dropped on every peer alike.
+            auto found = tryGetUnitState(effect.unit);
+            if (!found)
+            {
+                continue;
+            }
+            auto& unit = found->get();
+            const auto& definition = unitDefinitions.at(unit.unitType);
+            if (unit.isDead() || unit.isBeingBuilt(definition))
+            {
+                // A nanoframe's hit points track its build progress.
+                continue;
+            }
+            const auto room = definition.maxHitPoints > unit.hitPoints ? definition.maxHitPoints - unit.hitPoints : 0u;
+            unit.hitPoints += std::min(room, effect.amount);
+        }
+    }
+
+    void GameSimulation::bindModRuntime()
+    {
+        modRuntime_->bind(gameTime.value, ModRuntimeWorld{this, &modRuntimeUnitExists, &modRuntimeUnitInfo});
+    }
+
+    void GameSimulation::notifyModUnitCreated(UnitId unit)
+    {
+        if (!modRuntime_)
+        {
+            return;
+        }
+        const auto& state = getUnitState(unit);
+        bindModRuntime();
+        modRuntime_->onUnitCreated(unit, state.owner, state.unitType);
+    }
+
+    void GameSimulation::notifyModUnitCompleted(UnitId unit)
+    {
+        if (!modRuntime_)
+        {
+            return;
+        }
+        bindModRuntime();
+        modRuntime_->onUnitCompleted(unit);
+    }
+
+    void GameSimulation::notifyModUnitKilled(UnitId unit, std::optional<UnitId> attacker)
+    {
+        if (!modRuntime_)
+        {
+            return;
+        }
+        bindModRuntime();
+        modRuntime_->onUnitKilled(unit, attacker);
+    }
+
     void GameSimulation::setEconomyProvider(std::unique_ptr<EconomyProvider> provider)
     {
         economyProvider_ = std::move(provider);
@@ -780,6 +874,7 @@ namespace rwe
         {
             missionRules->unitDying(*this, targetId, unit.owner);
         }
+        notifyModUnitKilled(targetId, std::nullopt);
         unit.markAsDeadNoCorpse();
         cancelFactoryProductOnDeath(*this, targetId);
         recordUnitDeath(*this, targetId, "reclaimed", std::nullopt);
@@ -989,6 +1084,7 @@ namespace rwe
         {
             missionRules->unitDying(*this, unitId, unit.owner);
         }
+        notifyModUnitKilled(unitId, std::nullopt);
 
         // Self-destruction leaves nothing to reclaim.
         unit.markAsDeadNoCorpse();
@@ -1609,6 +1705,7 @@ namespace rwe
         {
             missionRules->unitDying(*this, unitId, unit.owner);
         }
+        notifyModUnitKilled(unitId, std::nullopt);
         unit.markAsDeadNoCorpse();
         cancelFactoryProductOnDeath(*this, unitId);
         if (countAsLoss)
@@ -2035,6 +2132,7 @@ namespace rwe
         {
             missionRules->unitDying(*this, unitId, unit.owner);
         }
+        notifyModUnitKilled(unitId, attacker);
         unit.markAsDead();
         cancelFactoryProductOnDeath(*this, unitId);
         getPlayer(unit.owner).unitsLost += 1;
@@ -2417,6 +2515,7 @@ namespace rwe
         // surface does: once, half away from zero.
         if (modRuntime_)
         {
+            bindModRuntime();
             const auto adjusted = modRuntime_->adjustDamage(
                 unitId, attacker.value_or(UnitId(0)), static_cast<float>(damage), paralyzer);
             damage = static_cast<int64_t>(std::floor(adjusted + 0.5f));
@@ -3390,7 +3489,11 @@ namespace rwe
         // moves. The hook sees the tick's settled state.
         if (modRuntime_)
         {
+            bindModRuntime();
             modRuntime_->onTick(gameTime.value);
+            // Everything queued this tick, by any hook, lands here, once,
+            // after every native phase and on_tick.
+            applyModEffects();
         }
 
         // Last, once every phase has left its mark on the tick: the recorder

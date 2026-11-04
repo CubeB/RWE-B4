@@ -9,6 +9,8 @@ import {
 } from "./preferences";
 import {
   getInstalledMods,
+  modArgs,
+  summaryOf,
   hasUniqueInspectionRoot,
   resourceDirectoriesForMods,
   resourceDirectoriesForSelectedRoot,
@@ -85,6 +87,48 @@ describe("launcher profile and mod selection", () => {
       "Escalation",
     ]);
     expect(found[0].path).toBe(data);
+  });
+
+  it("lists a format-1 package with no archives and keeps its manifest for --mod", async () => {
+    const mods = path.join(directory, "mods");
+    for (const name of ["shield", "legacy", "nothing"]) {
+      fs.mkdirSync(path.join(mods, name), { recursive: true });
+    }
+    // A runtime package is often a manifest and a script, and nothing else.
+    fs.writeFileSync(
+      path.join(mods, "shield", "rwe_mod.json"),
+      JSON.stringify({
+        manifestVersion: 1,
+        id: "com.example.shield",
+        name: "Regenerating shield",
+        version: "1.0.0",
+        kind: "mutator",
+        entry: "scripts/main.lua",
+      })
+    );
+    fs.writeFileSync(
+      path.join(mods, "legacy", "rwe_mod.json"),
+      JSON.stringify({ shortname: "legacy", name: "Old", author: "x" })
+    );
+    fs.writeFileSync(
+      path.join(mods, "nothing", "rwe_mod.json"),
+      JSON.stringify({ manifestVersion: 1 })
+    );
+    const found = await getInstalledMods(mods);
+    expect(found.map(mod => mod.name)).toEqual(["legacy", "shield"]);
+    const shield = found.find(mod => mod.name === "shield");
+    expect(shield?.modManifest).toBe(path.join(mods, "shield", "rwe_mod.json"));
+    // A legacy descriptor only adds its data, as before.
+    expect(
+      found.find(mod => mod.name === "legacy")?.modManifest
+    ).toBeUndefined();
+    expect(modArgs(found)).toEqual({ mods: [shield?.modManifest] });
+    expect(shield?.summary).toBe("mutator 1.0.0");
+    expect(summaryOf({ kind: "mutator", version: "<b>1</b>" })).toEqual({
+      summary: "mutator",
+    });
+    expect(summaryOf(null)).toEqual({});
+    expect(modArgs(found.filter(mod => mod.name === "legacy"))).toEqual({});
   });
 
   it("preserves explicit resource roots in mod metadata and leaves unknown fields on disk", async () => {

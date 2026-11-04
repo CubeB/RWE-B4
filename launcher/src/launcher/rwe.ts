@@ -45,6 +45,12 @@ export interface RweArgs {
   dataPaths?: string[];
   /** Per-selected-package paths. MOD-DIRS-01 and BUILDER-GUI-RESOURCE-DIRECTORY.md. */
   resourceDirectories?: ResourceDirectories;
+  /**
+   * Format-1 author manifests for the engine to resolve, one `--mod` each
+   * (MOD-SDK-015/022). Load order is the engine's, from the manifests, so
+   * the order here does not matter.
+   */
+  mods?: string[];
   map?: string;
   interface?: string;
   port?: number;
@@ -200,6 +206,11 @@ export function serializeRweArgs(args: RweArgs): string[] {
   if (args.dataPaths) {
     for (const path of args.dataPaths) {
       option("data-path", path);
+    }
+  }
+  if (args.mods) {
+    for (const manifest of args.mods) {
+      option("mod", manifest);
     }
   }
   if (args.resourceDirectories) {

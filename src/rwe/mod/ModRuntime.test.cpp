@@ -1,4 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <rwe/mod/ModRuntime.h>
 #include <string>
 #include <vector>
@@ -160,5 +163,300 @@ namespace rwe
         });
         fixture.runtime.onTick(1);
         CHECK(fixture.runtime.disabledPackages().empty());
+    }
+
+    namespace
+    {
+        bool onlyUnitThree(const void*, UnitId unit)
+        {
+            return unit == UnitId(3);
+        }
+
+        std::string shieldExampleSource()
+        {
+            const auto path =
+                std::filesystem::path(RWE_SOURCE_DIR) / "examples" / "mod-shield-runtime" / "scripts" / "main.lua";
+            std::ifstream file(path, std::ios::binary);
+            REQUIRE(file);
+            return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        }
+
+        ModRuntimePackage shieldPackage()
+        {
+            return {"com.example.shield",
+                "com.example.shield/scripts/main.lua",
+                shieldExampleSource(),
+                nlohmann::json{{"capacity", 200}, {"regen_per_tick", 1}}};
+        }
+    }
+
+    TEST_CASE("a runtime script reads the bound tick and keeps per-unit state", "[modsdk][modruntime]")
+    {
+        Fixture fixture({package("a.unit", R"(
+            function hook_damage_v1(v, a, amount, paralyzer, prev)
+                rwe.unit_set(v, "hits", (rwe.unit_get(v, "hits") or 0) + 1)
+                return rwe.tick()
+            end
+        )")});
+
+        fixture.runtime.bind(42, nullptr, nullptr);
+        CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 1.0f, false) == 42.0f);
+        CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 1.0f, false) == 42.0f);
+        CHECK(fixture.runtime.adjustDamage(UnitId(5), UnitId(4), 1.0f, false) == 42.0f);
+        REQUIRE(fixture.runtime.disabledPackages().empty());
+
+        const auto three = fixture.store.getUnit("a.unit", UnitId(3), "hits");
+        REQUIRE(three);
+        CHECK(three->f32 == 2.0f);
+        CHECK(fixture.store.getUnit("a.unit", UnitId(5), "hits")->f32 == 1.0f);
+
+        // Entries go with their unit.
+        fixture.store.removeUnit(UnitId(3));
+        CHECK_FALSE(fixture.store.getUnit("a.unit", UnitId(3), "hits"));
+
+        // on_tick moves the tick rwe.tick() reports as well.
+        fixture.runtime.onTick(50);
+        CHECK(fixture.runtime.adjustDamage(UnitId(5), UnitId(4), 1.0f, false) == 50.0f);
+    }
+
+    TEST_CASE("unit_set refuses a unit the simulation does not have", "[modsdk][modruntime]")
+    {
+        Fixture fixture({package("a.unit", R"(
+            function hook_damage_v1(v, a, amount, paralyzer, prev)
+                rwe.unit_set(v, "seen", true)
+                return prev
+            end
+        )")});
+        fixture.runtime.bind(1, nullptr, &onlyUnitThree);
+
+        CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 7.0f, false) == 7.0f);
+        CHECK(fixture.runtime.disabledPackages().empty());
+        CHECK(fixture.store.getUnit("a.unit", UnitId(3), "seen"));
+
+        // A free id is refused: the next unit built there would inherit it.
+        CHECK(fixture.runtime.adjustDamage(UnitId(9), UnitId(4), 7.0f, false) == 7.0f);
+        REQUIRE(fixture.runtime.disabledPackages().size() == 1);
+        CHECK_FALSE(fixture.store.getUnit("a.unit", UnitId(9), "seen"));
+    }
+
+    TEST_CASE("unit_set refuses a table value", "[modsdk][modruntime]")
+    {
+        // One case per value, so a crash names the value that caused it
+        // (MSVC Release, 2026-11-04).
+        Fixture fixture({package("a.bad",
+            "function hook_damage_v1(v, a, amount, paralyzer, prev) rwe.unit_set(v, 'k', {}) return prev end")});
+        CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 7.0f, false) == 7.0f);
+        CHECK(fixture.runtime.disabledPackages().size() == 1);
+    }
+
+    TEST_CASE("unit_set refuses a value that is not finite", "[modsdk][modruntime]")
+    {
+        // One case per value, so a crash names the value that caused it
+        // (MSVC Release, 2026-11-04).
+        Fixture fixture({package("a.bad",
+            "function hook_damage_v1(v, a, amount, paralyzer, prev) rwe.unit_set(v, 'k', 0/0) return prev end")});
+        CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 7.0f, false) == 7.0f);
+        CHECK(fixture.runtime.disabledPackages().size() == 1);
+    }
+
+    TEST_CASE("unit_set refuses a nil value", "[modsdk][modruntime]")
+    {
+        // One case per value, so a crash names the value that caused it
+        // (MSVC Release, 2026-11-04).
+        Fixture fixture({package("a.bad",
+            "function hook_damage_v1(v, a, amount, paralyzer, prev) rwe.unit_set(v, 'k', nil) return prev end")});
+        CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 7.0f, false) == 7.0f);
+        CHECK(fixture.runtime.disabledPackages().size() == 1);
+    }
+
+    TEST_CASE("the shield example absorbs, regenerates and survives a save", "[modsdk][modruntime]")
+    {
+        ModStateStore store;
+        ModRuntime runtime({shieldPackage()}, 7, store);
+
+        // A fresh unit has a full 200 shield.
+        runtime.bind(10, nullptr, nullptr);
+        CHECK(runtime.adjustDamage(UnitId(3), UnitId(4), 150.0f, false) == 0.0f);
+
+        // Ten ticks later it has regenerated 10, to 60, so 40 of 100 gets through.
+        runtime.bind(20, nullptr, nullptr);
+        CHECK(runtime.adjustDamage(UnitId(3), UnitId(4), 100.0f, false) == 40.0f);
+
+        // A paralyzer hit is left alone and does not touch the shield.
+        CHECK(runtime.adjustDamage(UnitId(3), UnitId(4), 500.0f, true) == 500.0f);
+
+        // Another unit's shield is its own.
+        CHECK(runtime.adjustDamage(UnitId(5), UnitId(4), 100.0f, false) == 0.0f);
+
+        // Regeneration stops at capacity.
+        runtime.bind(10000, nullptr, nullptr);
+        CHECK(runtime.adjustDamage(UnitId(5), UnitId(4), 250.0f, false) == 50.0f);
+        REQUIRE(runtime.disabledPackages().empty());
+
+        // Save, resume into a fresh runtime, and the next hit agrees with the
+        // uninterrupted run: nothing the shield needs lived in Lua.
+        const auto saved = runtime.toJson();
+        ModStateStore resumedStore;
+        ModRuntime resumed({shieldPackage()}, 7, resumedStore);
+        resumed.loadJson(saved);
+        CHECK(resumed.hash() == runtime.hash());
+
+        runtime.bind(10030, nullptr, nullptr);
+        resumed.bind(10030, nullptr, nullptr);
+        const auto uninterrupted = runtime.adjustDamage(UnitId(5), UnitId(4), 100.0f, false);
+        const auto afterResume = resumed.adjustDamage(UnitId(5), UnitId(4), 100.0f, false);
+        CHECK(uninterrupted == 70.0f);
+        CHECK(afterResume == uninterrupted);
+        CHECK(resumed.hash() == runtime.hash());
+    }
+
+    TEST_CASE("unit lifecycle events reach the scripts that export them", "[modsdk][modruntime]")
+    {
+        Fixture fixture({
+            package("a.events", R"(
+                function on_unit_created(unit, owner, unitType)
+                    rwe.store_set("created", unit .. ":" .. owner .. ":" .. unitType)
+                end
+                function on_unit_completed(unit)
+                    rwe.store_set("completed", unit)
+                end
+                function on_unit_killed(unit, attacker)
+                    rwe.store_set("killed", unit .. ":" .. tostring(attacker))
+                end
+            )"),
+            // A package that exports none of them is simply not called.
+            package("b.quiet", "function on_tick(tick) end"),
+        });
+
+        fixture.runtime.onUnitCreated(UnitId(3), PlayerId(1), "ARMPW");
+        fixture.runtime.onUnitCompleted(UnitId(3));
+        fixture.runtime.onUnitKilled(UnitId(3), UnitId(8));
+        REQUIRE(fixture.runtime.disabledPackages().empty());
+
+        CHECK(fixture.store.getGlobal("a.events", "created")->bytes == "3:1:ARMPW");
+        CHECK(fixture.store.getGlobal("a.events", "completed")->f32 == 3.0f);
+        CHECK(fixture.store.getGlobal("a.events", "killed")->bytes == "3:8");
+
+        // No attacker arrives as nil, not as a unit id that could be real.
+        fixture.runtime.onUnitKilled(UnitId(4), std::nullopt);
+        CHECK(fixture.store.getGlobal("a.events", "killed")->bytes == "4:nil");
+    }
+
+    TEST_CASE("a faulting lifecycle event disables its package", "[modsdk][modruntime]")
+    {
+        Fixture fixture({
+            package("a.bad", "function on_unit_killed(unit, attacker) error('no') end"),
+            package("b.good", "function on_unit_killed(unit, attacker) rwe.store_set('n', unit) end"),
+        });
+
+        fixture.runtime.onUnitKilled(UnitId(5), std::nullopt);
+        const auto disabled = fixture.runtime.disabledPackages();
+        REQUIRE(disabled.size() == 1);
+        CHECK(disabled[0] == "a.bad");
+        CHECK(fixture.store.getGlobal("b.good", "n")->f32 == 5.0f);
+    }
+
+    namespace
+    {
+        bool fakeUnitInfo(const void*, UnitId unit, ModUnitInfo& info)
+        {
+            if (unit != UnitId(3))
+            {
+                return false;
+            }
+            info.owner = PlayerId(2);
+            info.unitType = "ARMPW";
+            info.hitPoints = 90;
+            info.maxHitPoints = 120;
+            info.complete = false;
+            info.x = 1.5f;
+            info.y = 0.0f;
+            info.z = -4.0f;
+            return true;
+        }
+    }
+
+    TEST_CASE("unit_info reports a unit, or nil for none", "[modsdk][modruntime]")
+    {
+        Fixture fixture({package("a.look", R"(
+            function hook_damage_v1(v, a, amount, paralyzer, prev)
+                local info = rwe.unit_info(v)
+                if info == nil then
+                    rwe.store_set("seen", "nil")
+                else
+                    rwe.store_set("seen", info.type .. ":" .. info.owner .. ":" .. info.health .. "/"
+                        .. info.max_health .. ":" .. tostring(info.complete) .. ":" .. tostring(info.dead)
+                        .. ":" .. info.x .. "," .. info.z)
+                end
+                return prev
+            end
+        )")});
+
+        // Bound without a unit_info source: every unit reads as nil.
+        fixture.runtime.bind(1, nullptr, nullptr);
+        fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 1.0f, false);
+        CHECK(fixture.store.getGlobal("a.look", "seen")->bytes == "nil");
+
+        fixture.runtime.bind(1, ModRuntimeWorld{nullptr, nullptr, &fakeUnitInfo});
+        fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 1.0f, false);
+        CHECK(fixture.store.getGlobal("a.look", "seen")->bytes == "ARMPW:2:90/120:false:false:1.5,-4.0");
+
+        fixture.runtime.adjustDamage(UnitId(7), UnitId(4), 1.0f, false);
+        CHECK(fixture.store.getGlobal("a.look", "seen")->bytes == "nil");
+        CHECK(fixture.runtime.disabledPackages().empty());
+    }
+
+    TEST_CASE("heal queues an effect instead of acting at once", "[modsdk][modruntime]")
+    {
+        Fixture fixture({
+            package("a.medic", R"(
+                function on_unit_killed(unit, attacker)
+                    rwe.heal(unit, 30)
+                    rwe.heal(unit + 1, 5)
+                end
+            )"),
+            package("b.medic", "function on_unit_killed(unit, attacker) rwe.heal(unit, 7) end"),
+        });
+
+        CHECK(fixture.runtime.toJson().contains("effects") == false);
+        fixture.runtime.onUnitKilled(UnitId(3), std::nullopt);
+        REQUIRE(fixture.runtime.disabledPackages().empty());
+
+        // Pending effects are runtime state: saved, hashed and restored.
+        const auto saved = fixture.runtime.toJson();
+        REQUIRE(saved.contains("effects"));
+        ModStateStore resumedStore;
+        ModRuntime resumed({package("a.medic", "function on_tick(t) end"), package("b.medic", "function on_tick(t) end")},
+            7,
+            resumedStore);
+        resumed.loadJson(saved);
+        CHECK(resumed.hash() == fixture.runtime.hash());
+
+        const auto effects = fixture.runtime.takeEffects();
+        REQUIRE(effects.size() == 3);
+        CHECK(effects[0].packageId == "a.medic");
+        CHECK(effects[0].unit == UnitId(3));
+        CHECK(effects[0].amount == 30u);
+        CHECK(effects[1].unit == UnitId(4));
+        CHECK(effects[2].packageId == "b.medic");
+        CHECK(effects[2].amount == 7u);
+
+        // Taking them empties the queue, and the JSON is as it was.
+        CHECK(fixture.runtime.takeEffects().empty());
+        CHECK(fixture.runtime.toJson().contains("effects") == false);
+        CHECK(resumed.takeEffects().size() == 3);
+    }
+
+    TEST_CASE("heal refuses amounts and units it cannot honour", "[modsdk][modruntime]")
+    {
+        for (const std::string call : {"rwe.heal(unit, -1)", "rwe.heal(unit, 1.5)", "rwe.heal(unit, 'x')", "rwe.heal(9, 1)"})
+        {
+            INFO(call);
+            Fixture fixture({package("a.bad", "function on_unit_killed(unit, attacker) " + call + " end")});
+            fixture.runtime.bind(1, nullptr, &onlyUnitThree);
+            fixture.runtime.onUnitKilled(UnitId(3), std::nullopt);
+            CHECK(fixture.runtime.disabledPackages().size() == 1);
+            CHECK(fixture.runtime.takeEffects().empty());
+        }
     }
 }

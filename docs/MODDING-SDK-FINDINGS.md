@@ -870,6 +870,361 @@ and the real launch cannot resolve the same manifests differently.
   archives, manifest bytes and entry scripts (MOD-SDK-006/014), not the
   resolved identity (#979).
 
+## MOD-SDK-016: per-unit runtime state and the shield example
+
+Status: implemented 2026-11-04 on the local branch `970-shield-example`, built
+on `mod-launch-switch` (MOD-SDK-015). Issue #970, partly. RWE-original;
+inherits MOD-SDK-001's boundary, and no byte-tactics comparison applies. **Not
+yet compiled or run** when written; CI is the build.
+
+### What a runtime script can now do
+
+Behind a new feature, `runtime.unit-state@1`, which a build without it refuses
+at resolution rather than failing mid-game:
+
+- `rwe.tick()` returns the simulation tick the call runs in. A script must not
+  keep timing in Lua variables, because those are not saved: a resumed game
+  would see different values from an uninterrupted one.
+- `rwe.unit_get(unit, key)` and `rwe.unit_set(unit, key, value)` read and
+  write the package's own namespace in the store's per-unit scope
+  (MOD-SDK-008), with the same value rules as `store_set`. A non-integer or
+  out-of-range unit id, a value that is not a finite number, string or
+  boolean, and a quota overflow each raise a Lua error, and the error disables
+  the package as any other fault does.
+- `unit_set` refuses a unit the simulation does not have. A unit id is a slot
+  that `spawnNewUnits` reuses within the same tick `deleteDeadUnits` frees it,
+  so an entry written for a free id would be inherited by the next unit built
+  there.
+
+### Engine side
+
+- `deleteDeadUnits` now calls `ModStateStore::removeUnit` before erasing each
+  unit. The store has offered `removeUnit` since MOD-SDK-008, but nothing
+  called it; that was harmless only while nothing could write per-unit state.
+- `ModRuntime::bind(tick, context, unitExists)` replaces any stored reference
+  to the simulation. `GameSimulation` binds itself, with a static function
+  pointer, immediately before folding damage and before `on_tick`. A stored
+  `[this]` callback would dangle: the loader builds a simulation and
+  `GameScene` then moves it. The tick is not runtime state, because it is
+  re-bound from the simulation's own clock before every dispatch, so it needs
+  no saving.
+- The new Lua functions keep C++ objects out of scope wherever `luaL_error`
+  can be reached. Lua is built as C, so the error longjmps past C++
+  destructors. The older `store_get`/`store_set` hold a `std::string` across
+  `luaL_error`, which leaks it on that path; they are left unchanged here.
+
+### The example
+
+`examples/mod-shield-runtime` gives every unit a regenerating shield (options
+`capacity`, default 200, and `regen_per_tick`, default 1). Damage is taken
+from the shield first. Regeneration is worked out at the next hit, from the
+tick of the last one, so an unshot unit costs nothing per tick. Paralyzer hits
+pass through untouched. Everything a future hit depends on is in the store,
+which is why a saved and resumed runtime gives the same next hit as an
+uninterrupted one; `[modruntime]` checks exactly that, plus absorption,
+regeneration, capping and per-unit isolation. `[damage][modruntime]` checks,
+through the real `applyDamage`, that the hook sees the simulation's tick and
+that the unit's entries are gone after `deleteDeadUnits`.
+
+The example writes two entries per shielded unit, and the default quota is
+4096 entries per package, so about 2048 units can carry a shield at once. The
+next write past that is a quota fault, and the fault disables the package,
+the same way on every peer.
+
+### Still open for #970
+
+Lifecycle hooks (added in MOD-SDK-017); filtered unit, projectile and
+player queries; deferred effects; a decision on reclaim, feature and remote
+damage, which still bypass the unit hook; and the two-peer and
+`net-test.py` acceptance runs.
+
+## MOD-SDK-017: unit lifecycle events
+
+Status: implemented 2026-11-04 on `970-shield-example`, after MOD-SDK-016.
+Issue #970, partly. RWE-original; inherits MOD-SDK-001's boundary, and no
+byte-tactics comparison applies. Not compiled locally; CI is the build.
+
+Behind `runtime.lifecycle@1`, a runtime package may export:
+
+| Event | Arguments | Raised |
+| --- | --- | --- |
+| `on_unit_created` | unit, owner, unitType | in `trySpawnUnit`, beside `UnitSpawnedEvent`: every new unit, a nanoframe included |
+| `on_unit_completed` | unit | when a builder finishes a unit (both build paths in `UnitBehaviorService`), when a unit is spawned complete (`trySpawnCompletedUnit`), and when a resurrection raises one |
+| `on_unit_killed` | unit, attacker | on the four real death paths -- killed, quietly killed, reclaimed, self-destructed -- beside the mission rules' `unitDying`, before the unit is marked dead |
+
+- `unitType` is the FBI unit name, never a table index, for the same reason
+  the sync hash reads names: a definition index depends on what is in each
+  machine's data folder.
+- `attacker` is `nil` when there is none. `hook_damage_v1` passes 0 for a
+  missing attacker, but 0 can be a real unit id, so the new events do not copy
+  that.
+- A killed unit still exists when its event runs, so the script can read and
+  write its per-unit state. That state is then deleted with the unit
+  (MOD-SDK-016).
+- A capture is not reported as a death. The mission rules hear one, because
+  the original raises a cause-4 death of the old unit, but the unit id lives
+  on under its new owner, and telling a mod it died would be false.
+- Loading a save places units directly (`save_util.cpp`), not through
+  `trySpawnUnit`, so no event is raised again on resume. A replay re-runs the
+  simulation, so it raises them exactly as the recorded game did.
+- Each event binds the runtime first (`ModRuntime::bind`), so `rwe.tick()` and
+  the `unit_set` existence check work inside it. A fault disables the
+  package, as for `on_tick`.
+
+Events run synchronously at the point where they are raised, inside the tick.
+A script can change nothing in the simulation from them except its own store
+entries, so their position inside the tick decides only what the script can
+read, never what any native phase does.
+
+Still open for #970: filtered queries, deferred effects, the limb-damage
+decision and the two-peer acceptance run.
+
+## MOD-SDK-018: the runtime unit query
+
+Status: implemented 2026-11-04 on `970-shield-example`, after MOD-SDK-017.
+Issue #970, partly. RWE-original; no byte-tactics comparison applies. Not
+compiled locally; CI is the build.
+
+Behind `runtime.unit-query@1`, `rwe.unit_info(unit)` returns a table with
+`owner`, `type` (the FBI name), `health`, `max_health`, `complete`, `dead` and
+`x`/`y`/`z`, or `nil` when there is no such unit.
+
+- It is not filtered by line of sight. A runtime rule runs on every peer over
+  the whole simulation, the way a native rule does, so what one peer could
+  read every peer reads, and the answer is the same everywhere. Filtering by
+  what a player can see belongs to the presentation view (MOD-SDK-013) and to
+  scripted AI's observation policy (MOD-09), not to rules.
+- Positions are the simulation's own floats (`SimScalar`) widened to Lua
+  numbers. They are the same values the sync hash reads, so reading them
+  cannot diverge, although arithmetic a script then does on them is subject to
+  MOD-SDK-004's libm/`^` caveat.
+- `ModRuntime::bind` now takes a `ModRuntimeWorld`: a context pointer and
+  plain function pointers for unit existence and unit info.
+  `GameSimulation::bindModRuntime()` builds one before every dispatch, from
+  file-local callbacks in `GameSimulation.cpp`, so the widely included
+  header gains one declaration and no types. The three-argument `bind`
+  remains for tests that supply only an existence check.
+
+`store_get`/`store_set` were rebuilt on the same helpers as `unit_get` and
+`unit_set`, so no Lua-callable function holds a C++ object across `luaL_error`
+any more. One behaviour changes with them: `store_set` used to test
+`lua_isnumber` first, which accepts numeric strings, so `store_set(k, "12")`
+stored the number 12. A string now stays a string, as it does in `unit_set`.
+No shipped package depended on the old conversion. The quota error no longer
+appends the package id; the runtime log already names the package it
+disables.
+
+Still open for #970: deferred effects and the two-peer acceptance run. The
+limb-damage decision is MOD-SDK-019.
+
+## MOD-SDK-019: which damage `hook_damage_v1` folds
+
+Status: decision recorded 2026-11-04, closing the "limb damage" question
+MOD-SDK-009 left open. Documentation only; no behaviour changes. RWE-original
+policy, no byte-tactics comparison: every path below keeps the arithmetic its
+existing findings give it.
+
+`hook_damage_v1` folds combat damage to a unit at the final-damage point of
+`GameSimulation::applyDamage`, after attacker veterancy, armour and victim
+veterancy. These are the other places that take hit points off a unit, and
+what the hook does with each:
+
+| Path | Where | Folded? | Why |
+| --- | --- | --- | --- |
+| Remote damage to a unit simulated elsewhere | `applyRemoteDamage`, `SimulationOwnership.cpp` | Never | The owning simulation is authoritative: it runs the real `applyDamage`, fold included, and only its record or death declaration counts. Folding the local copy too would apply the mod twice or disagree with the owner. |
+| Mixed ownership: our attack on a peer's unit | `MixedOwnership.cpp` | Never | The same rule from the attacker's side: the figure is sent to the owner, and the local drop is display only, held above zero. |
+| Reclaim, cause 5 | `GameSimulation.cpp`, reclaim | Not in v1 | The hit points taken decide how much of the cost is handed back, so changing them changes the economy. That needs its own contract (a future `hook_reclaim_v1`), not a quiet widening of combat damage. |
+| A cancelled factory product, cause 9 | `FactoryConstruction.cpp` | No | A fixed rule, not a hit: bypassing armour but keeping victim veterancy is the original's own arithmetic for it. |
+| The end-of-game decay | `GameSimulation_endgame.cpp` | No | The same fixed rule, applied to every unit of a defeated player. A shield absorbing it would be wrong. |
+| Feature damage | `GameSimulation_fire.cpp`, features | Out of scope | The hook is unit-only by contract. Features would get a hook of their own. |
+
+Two consequences for authors:
+
+- In an RWE lockstep game every unit is simulated on every peer, so every
+  combat hit reaches the hook, once, on every peer. The "never" rows apply
+  only to own-clock and mixed-ownership play against an original client,
+  where a remote unit's health is the other side's to decide.
+- A runtime mod that wants to change reclaim, the factory cancel or the decay
+  needs a new hook version. `hook_damage_v1`'s meaning does not grow.
+
+## MOD-SDK-020: deferred effects, starting with heal
+
+Status: implemented 2026-11-04 on `970-shield-example`. Issue #970, partly.
+RWE-original; no byte-tactics comparison applies. Not compiled locally; CI is
+the build.
+
+Until now a runtime script could change the simulation in one way only, by
+folding damage. Behind `runtime.effects@1` it can now ask for a change, and
+the asking is separate from the doing:
+
+- `rwe.heal(unit, amount)` queues an effect. It does not touch the unit.
+  `amount` must be a whole number from 0 to 1000000000; the unit must exist
+  when the call is made. Either refusal is a Lua error, which disables the
+  package as any other fault does.
+- `GameSimulation::applyModEffects` applies the queue once per tick, straight
+  after `on_tick`, after every native phase, in the order the effects were
+  queued: by hook call, then by load order within a call. Native phases
+  therefore never see a half-applied change, and no hook can re-enter
+  `applyDamage` or any other native path.
+- Each effect is checked again when it is applied, not only when it is
+  queued. A unit that has died, or whose slot has been reused, since then is
+  skipped, and so is a unit still under construction, whose hit points track
+  its build progress. A heal is capped at the unit's maximum.
+- The queue is runtime state. `ModRuntime::toJson` writes it under
+  `effects` when it is not empty, so it is saved, hashed and restored; an
+  empty queue leaves the JSON, and so every existing save and hash, exactly
+  as it was. Saves happen between ticks, after the queue has been applied, so
+  in a running game it is normally empty, but anything a hook queues outside
+  a tick (a unit created during load, say) survives a save as well.
+- At most `maxPendingEffects` (10000) effects may wait at once, across all
+  packages; the next is refused.
+
+Heal is the first effect because it is bounded and cannot kill, spawn or move
+anything. Effects that do those things need their own validation (resources,
+ownership, placement) and are not attempted here.
+
+Still open for #970: more effect kinds and the two-peer acceptance run.
+
+## MOD-SDK-021: a scripted AI seat survives a save
+
+Status: implemented 2026-11-04 on `970-shield-example`. Issue #971, first
+slice. RWE-original; no byte-tactics comparison applies. Not compiled
+locally; CI is the build. Depends on #984, which keeps a loaded game's
+runtime store alive; that fix is needed for the runtime, not for this.
+
+The native engines rebuild on load by design (`ai-architecture-proposal.md`,
+placement B, and the open ROADMAP entry on AI serialization). #971 asks more
+of a Lua seat: its plans, timers and random position must survive, so that a
+resumed game makes the same decisions as an uninterrupted one.
+
+### The contract
+
+- `AiController` gains `saveState()`, `loadState()` and `stateHash()`. The
+  defaults say "no state": native seats save nothing and hash nothing, so a
+  game without Lua seats saves and hashes exactly as before, and a save
+  claiming state for a native seat is refused.
+- A Lua seat saves its RNG position, its fault flag and its own store as
+  `rwe.lua-ai` version 1. The store is a `ModStateStore` private to the seat,
+  reached through `ai.store_get(key)` and `ai.store_set(key, value)` with the
+  runtime's value rules (the shared `ModLuaValues` helpers). It is the seat's
+  own, not the simulation's, because `AiController::tick` sees the simulation
+  as const.
+- **Lua variables are not saved.** A resumed seat runs its script's top level
+  again, so a script keeps anything that must survive -- plans, timers,
+  targets -- in `ai.store`. The random stream carries on from its saved
+  position.
+- A state saved for another package, or malformed, is refused before
+  anything changes. A seat saved disabled resumes disabled.
+
+### Where it goes
+
+- `save_util.cpp` writes `aiStates`, `[{player, state}]` in player order,
+  only when some seat has state, and raises the save version to 4 then. The
+  load restores them into the controllers the loader built, after the rest of
+  the simulation. A save from before this has no `aiStates`, and a Lua seat
+  then starts afresh, as it did before.
+- `GameHash_util.cpp` folds a digest of the states in player order (nothing
+  for all-native games). `dump_util.cpp` writes them for desync reports.
+- The free functions `aiControllerStates`, `loadAiControllerStates` and
+  `aiControllerStatesHash` sit beside `AiController`, so neither `sim/` nor
+  `game/` grows a dependency on the other.
+
+### Evidence
+
+`[modai][modsdk]`: a seat run five ticks, saved and restored into a fresh
+seat, produces the same commands and state hash as the uninterrupted seat
+over the next five ticks. A fresh seat without the state does not, which is
+what shows the state is doing the work. Plus refusal of foreign and malformed
+states, and player-ordered save/load of several seats.
+
+### Still open for #971
+
+Rejoin: transferring a seat's state to a rejoining peer, or showing that a
+deterministic reconstruction reaches the same future. Replay with a recorded
+stream and no second producer. The two-peer delayed-packet and cross-build
+acceptance runs. Assigning a specific package to a specific seat.
+
+## MOD-SDK-022: the launcher passes format-1 packages to the engine
+
+Status: implemented 2026-11-04 on `970-shield-example`. Part of #979's
+groundwork. RWE-original. **Verified locally**: launcher `tsc` clean, ESLint
+with only the existing unrelated warning, Jest 15 suites and 179 tests (2
+new).
+
+Two gaps sat between the engine's `--mod` (MOD-SDK-015) and a game started
+from the launcher:
+
+- The launcher recognised only the legacy descriptor, which carries a
+  `shortname`. A format-1 manifest has `manifestVersion` and `id` instead, so
+  the launcher never read it. A package with no archives -- which is what a
+  runtime or AI package usually is, a manifest and a script -- was not listed
+  at all. All three shipped examples were in that state.
+- Nothing ever passed `--mod`, so even a listed package only added its data
+  paths and its scripts never ran.
+
+Now `getInstalledMods` lists a folder whose `rwe_mod.json` is a format-1
+manifest (`isFormatOneManifest`: a numeric `manifestVersion` and a non-empty
+`id`), with or without archives, and records the manifest path as
+`modManifest`. Both launch paths -- the local "launch" and the multiplayer
+room's `GameRoomEpic` -- pass every selected package's manifest as `--mod`,
+through `modArgs`, which adds no key at all for a selection of legacy
+packages, so those launch exactly as before. Load order is the engine's, from
+the manifests.
+
+The Library shows what a format-1 manifest says a package is: an active
+package's chip reads `shield · mutator 1.0.0`. The summary is the manifest's
+`kind` and `version`, each taken only if it is a short plain token, so a
+manifest cannot put markup or an essay on the home screen. It is display
+only; nothing decides on it.
+
+A format-1 package's `resourceDirectories` are not read by the launcher. The
+engine applies them from the manifest through `applyModResourceDirectories`,
+and the launcher's legacy key names (`builderGuis`) are not the manifest's
+(`weapons`), so reading both would apply one package's roots under two
+vocabularies.
+
+The lobby still compares archives, manifest bytes and entry scripts
+(MOD-SDK-006, MOD-SDK-014), not the engine's resolved identity. For now that
+is equivalent rather than weaker. The identity is a function of the manifest
+bytes, the entry scripts, the load order, the features and the options. The
+first two are compared, the order and features follow from the manifests
+deterministically, and the launcher passes no `--mod-option`, so every peer
+resolves with each package's defaults. Two peers that pass the lobby's check
+therefore resolve the same identity. The identity on the wire (#979) becomes
+necessary the day the lobby lets a room choose options. It should land with
+that feature, so that the room's chosen options are what is compared, not
+added now as a second copy of the same check.
+
+## MOD-SDK-023: Lua is built as C++
+
+Status: implemented 2026-11-04 on `970-shield-example`. RWE-original build
+policy; no byte-tactics comparison applies. Verified locally on MinGW64 gcc
+16.2; MSVC is CI's to confirm.
+
+MSVC Release test runs died -- every time, and only there -- inside whichever
+`unit_set` refusal test ran first. First the NaN case, then, once that was
+hardened, the nil case. Each is a `luaL_error` raised from a C++ host
+function. With Lua built as C, that is a `longjmp` across a C++ frame, which
+the C++ standard leaves undefined. gcc, clang and MSVC Debug survived it;
+MSVC Release did not.
+
+`libs/lua/CMakeLists.txt` now compiles the vendored sources as C++. Lua
+supports that unchanged: `ldo.c` switches `LUAI_THROW` to `throw` and
+`LUAI_TRY` to `try`/`catch(...)`, so an error unwinds RWE's frames as an
+exception, destructors included. The five RWE files that include Lua's headers
+(`ModRuntime`, `ModTransform`, `ModAiController`, `ModLuaValues` and
+`PresentationRuntime`) no longer wrap them in `extern "C"`.
+
+Behaviour is unchanged: the same source, the same fixed hash seed (the
+`lstate.c` patch) and the same arithmetic. Only how an error travels back to
+`lua_pcall` changes. One consequence worth knowing: a C++ exception thrown by
+a host function is now caught by Lua's `catch(...)` and comes back from
+`lua_pcall` as an error, so the package is disabled rather than the process
+terminated.
+
+MOD-SDK-016's rule -- no C++ object alive at a `luaL_error` -- stays good
+practice, but it is no longer what keeps the engine safe.
+
 ## Verification
 
 Executed 2026-11-02: `rwe_test "[modsdk]"` and the full `rwe_test` suite; the

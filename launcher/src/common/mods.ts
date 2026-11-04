@@ -30,6 +30,17 @@ export interface InstalledModResult {
   path: string;
   resourceDirectories?: ResourceDirectories;
   resourceDirectoryError?: string;
+  /**
+   * The package's format-1 author manifest, when it has one (MOD-SDK-022):
+   * passed to the engine as `--mod`, which resolves it with every other
+   * selected package. A legacy descriptor has none and only adds its data.
+   */
+  modManifest?: string;
+  /**
+   * What a format-1 manifest says the package is, for the Library to show:
+   * "mutator 1.0.0", say. Display only; nothing decides on it.
+   */
+  summary?: string;
 }
 export function getInstalledMods(
   baseDir: string,
@@ -53,14 +64,22 @@ export function getInstalledMods(
       .filter(e => e.isDirectory())
       .map<InstalledModResult | undefined>(e => {
         const modPath = path.join(baseDir, e.name);
-        const json = readRweModJson(path.join(modPath, "rwe_mod.json"));
-        if (!json && !hasArchives(modPath)) {
+        const manifestPath = path.join(modPath, "rwe_mod.json");
+        const raw = readJsonFile(manifestPath);
+        const json = legacyDescriptor(raw);
+        // A format-1 package may be nothing but a manifest and a script, so
+        // it is a mod whether or not it carries archives.
+        const formatOne = isFormatOneManifest(raw);
+        if (!json && !formatOne && !hasArchives(modPath)) {
           return undefined;
         }
         return {
           name: json?.shortname || e.name,
           path: modPath,
           resourceDirectories: json?.resourceDirectories,
+          ...(formatOne
+            ? { modManifest: manifestPath, ...summaryOf(raw) }
+            : {}),
         };
       });
 
@@ -227,22 +246,56 @@ export function resourceDirectoriesForMods(
     : { resourceDirectories: merged.resourceDirectories };
 }
 
-function readRweModJson(filename: string): RweModJson | undefined {
+function readJsonFile(filename: string): unknown {
   try {
-    const value = JSON.parse(fs.readFileSync(filename, "utf8"));
-    return value &&
-      typeof value.shortname === "string" &&
-      value.shortname.trim()
-      ? ({
-          ...value,
-          resourceDirectories: parseResourceDirectories(
-            value.resourceDirectories
-          ),
-        } as RweModJson)
-      : undefined;
+    return JSON.parse(fs.readFileSync(filename, "utf8"));
   } catch {
     return undefined;
   }
+}
+
+/** The display descriptor PACKAGE-003 recognises: a `shortname`, and nothing it resolves. */
+function legacyDescriptor(value: unknown): RweModJson | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const o = value as Record<string, unknown>;
+  return typeof o.shortname === "string" && o.shortname.trim()
+    ? ({
+        ...o,
+        resourceDirectories: parseResourceDirectories(o.resourceDirectories),
+      } as RweModJson)
+    : undefined;
+}
+
+/**
+ * A format-1 author manifest (MOD-SDK-002): `manifestVersion` and a stable
+ * `id`. Whether it resolves is the engine's to say; the launcher only has to
+ * know that it should hand it over.
+ */
+/** `kind version` from a format-1 manifest, when both are plain strings. */
+export function summaryOf(value: unknown): { summary?: string } {
+  if (typeof value !== "object" || value === null) {
+    return {};
+  }
+  const o = value as Record<string, unknown>;
+  const parts = [o.kind, o.version].filter(
+    (part): part is string =>
+      typeof part === "string" && /^[A-Za-z0-9._-]{1,32}$/.test(part)
+  );
+  return parts.length === 0 ? {} : { summary: parts.join(" ") };
+}
+
+export function isFormatOneManifest(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const o = value as Record<string, unknown>;
+  return (
+    typeof o.manifestVersion === "number" &&
+    typeof o.id === "string" &&
+    o.id !== ""
+  );
 }
 
 function hasArchives(directory: string): boolean {
@@ -255,4 +308,18 @@ function hasArchives(directory: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The `mods` launch argument for the selected packages: every format-1
+ * manifest among them, and no key at all when there is none, so a game of
+ * legacy packages launches exactly as it did before MOD-SDK-022.
+ */
+export function modArgs(selected: { modManifest?: string }[]): {
+  mods?: string[];
+} {
+  const mods = selected.flatMap(mod =>
+    mod.modManifest === undefined ? [] : [mod.modManifest]
+  );
+  return mods.length === 0 ? {} : { mods };
 }

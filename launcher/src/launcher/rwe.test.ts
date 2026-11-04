@@ -32,6 +32,13 @@ describe("serializeRweArgs", () => {
     }
   });
 
+  it("passes each format-1 manifest as its own --mod", () => {
+    expect(
+      serializeRweArgs({ mods: ["/m/a/rwe_mod.json", "/m/b/rwe_mod.json"] })
+    ).toEqual(["--mod=/m/a/rwe_mod.json", "--mod=/m/b/rwe_mod.json"]);
+    expect(serializeRweArgs({})).toEqual([]);
+  });
+
   it("keeps a flag with no value on its own", () => {
     expect(serializeRweArgs({ bridge: true, port: 6670 })).toEqual([
       "--port=6670",

@@ -67,3 +67,13 @@ it("prevents launching a second game and retains the import controls", () => {
   expect(play).toContain("disabled");
   expect(markup).toContain("Import game data");
 });
+
+it("labels a format-1 package with what its manifest says it is", () => {
+  const markup = home({
+    activeMods: ["ta", "shield"],
+    installedMods: ["ta", "shield"],
+    modSummaries: { shield: "mutator 1.0.0" },
+  });
+  expect(markup).toContain("shield · mutator 1.0.0");
+  expect(markup).toContain("Total Annihilation data");
+});

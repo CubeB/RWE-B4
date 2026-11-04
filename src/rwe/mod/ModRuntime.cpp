@@ -1,8 +1,11 @@
 #include "ModRuntime.h"
+#include "ModLuaValues.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
+#include <optional>
 #include <random>
 #include <set>
 #include <sstream>
@@ -10,12 +13,10 @@
 #include <utility>
 #include <rwe/util/Sha256.h>
 
-extern "C"
-{
+// Lua is built as C++ (MOD-SDK-023), so its headers are included as C++.
 #include <lauxlib.h>
 #include <lua.h>
 #include <lualib.h>
-}
 
 using json = nlohmann::json;
 
@@ -194,6 +195,16 @@ namespace rwe
             lua_setfield(state, -2, "store_set");
             lua_pushcfunction(state, randBelowFunction);
             lua_setfield(state, -2, "rand_below");
+            lua_pushcfunction(state, tickFunction);
+            lua_setfield(state, -2, "tick");
+            lua_pushcfunction(state, unitGetFunction);
+            lua_setfield(state, -2, "unit_get");
+            lua_pushcfunction(state, unitSetFunction);
+            lua_setfield(state, -2, "unit_set");
+            lua_pushcfunction(state, unitInfoFunction);
+            lua_setfield(state, -2, "unit_info");
+            lua_pushcfunction(state, healFunction);
+            lua_setfield(state, -2, "heal");
             lua_newtable(state);
             if (package.spec.options.is_object())
             {
@@ -270,67 +281,200 @@ namespace rwe
             return 0;
         }
 
+        static bool unitIdAt(lua_State* state, int index, UnitId& out)
+        {
+            if (!lua_isinteger(state, index))
+            {
+                return false;
+            }
+            const auto raw = lua_tointeger(state, index);
+            if (raw < 0 || raw > static_cast<lua_Integer>(std::numeric_limits<unsigned int>::max()))
+            {
+                return false;
+            }
+            out = UnitId(static_cast<unsigned int>(raw));
+            return true;
+        }
+
+        // rwe.store_get(key) -> value or nil, from this package's global
+        // namespace.
         static int storeGetFunction(lua_State* state)
         {
             auto* context = *static_cast<Context**>(lua_getextraspace(state));
             auto* impl = context->impl;
-            const auto& package = impl->packages[context->index];
-            const std::string key = luaL_checkstring(state, 1);
-            const auto value = impl->store->getGlobal(package.spec.id, key);
-            if (!value)
-            {
-                lua_pushnil(state);
-                return 1;
-            }
-            switch (value->type)
-            {
-            case ModValueType::I32:
-                lua_pushinteger(state, value->i32);
-                break;
-            case ModValueType::F32:
-                lua_pushnumber(state, value->f32);
-                break;
-            case ModValueType::String:
-            case ModValueType::Bytes:
-                lua_pushlstring(state, value->bytes.data(), value->bytes.size());
-                break;
-            }
+            std::size_t keyLength = 0;
+            const char* keyText = luaL_checklstring(state, 1, &keyLength);
+            pushModLuaValue(state,
+                impl->store->getGlobal(impl->packages[context->index].spec.id, std::string(keyText, keyLength)));
             return 1;
         }
 
+        // rwe.store_set(key, value). Written in the same shape as unit_set,
+        // with no C++ object alive at any luaL_error (MOD-SDK-016).
         static int storeSetFunction(lua_State* state)
         {
             auto* context = *static_cast<Context**>(lua_getextraspace(state));
             auto* impl = context->impl;
-            const auto& package = impl->packages[context->index];
-            const std::string key = luaL_checkstring(state, 1);
-            std::optional<ModValue> value;
-            if (lua_isboolean(state, 2))
-            {
-                value = ModValue::integer(lua_toboolean(state, 2) ? 1 : 0);
-            }
-            else if (lua_isnumber(state, 2))
-            {
-                const auto number = static_cast<float>(lua_tonumber(state, 2));
-                if (!std::isfinite(number))
-                {
-                    return luaL_error(state, "store_set value must be finite");
-                }
-                value = ModValue::number(number);
-            }
-            else if (lua_isstring(state, 2))
-            {
-                std::size_t length = 0;
-                const char* text = lua_tolstring(state, 2, &length);
-                value = ModValue::text(std::string(text, length));
-            }
-            else
+            std::size_t keyLength = 0;
+            const char* keyText = luaL_checklstring(state, 1, &keyLength);
+            const auto kind = modLuaValueKind(state, 2);
+            if (kind == ModLuaValueKind::Invalid)
             {
                 return luaL_error(state, "store_set value must be a number, string or boolean");
             }
-            if (!impl->store->setGlobal(package.spec.id, key, *value))
+            if (kind == ModLuaValueKind::NonFinite)
             {
-                return luaL_error(state, "store quota exceeded for %s", package.spec.id.c_str());
+                return luaL_error(state, "store_set value must be finite");
+            }
+            bool stored = false;
+            {
+                stored = impl->store->setGlobal(
+                    impl->packages[context->index].spec.id, std::string(keyText, keyLength), modLuaValueAt(state, 2, kind));
+            }
+            if (!stored)
+            {
+                return luaL_error(state, "store quota exceeded");
+            }
+            return 0;
+        }
+
+        // rwe.tick() -> the simulation tick the current call runs in.
+        static int tickFunction(lua_State* state)
+        {
+            auto* context = *static_cast<Context**>(lua_getextraspace(state));
+            lua_pushinteger(state, static_cast<lua_Integer>(context->impl->currentTick));
+            return 1;
+        }
+
+        // rwe.unit_info(unit) -> a table describing the unit, or nil when
+        // there is no such unit (or nothing to ask).
+        static int unitInfoFunction(lua_State* state)
+        {
+            auto* context = *static_cast<Context**>(lua_getextraspace(state));
+            auto* impl = context->impl;
+            UnitId unit(0);
+            if (!unitIdAt(state, 1, unit))
+            {
+                return luaL_error(state, "unit_info needs a unit id");
+            }
+            ModUnitInfo info;
+            if (!impl->world.unitInfo || !impl->world.unitInfo(impl->world.context, unit, info))
+            {
+                lua_pushnil(state);
+                return 1;
+            }
+            lua_createtable(state, 0, 9);
+            lua_pushinteger(state, static_cast<lua_Integer>(info.owner.value));
+            lua_setfield(state, -2, "owner");
+            lua_pushlstring(state, info.unitType.data(), info.unitType.size());
+            lua_setfield(state, -2, "type");
+            lua_pushinteger(state, static_cast<lua_Integer>(info.hitPoints));
+            lua_setfield(state, -2, "health");
+            lua_pushinteger(state, static_cast<lua_Integer>(info.maxHitPoints));
+            lua_setfield(state, -2, "max_health");
+            lua_pushboolean(state, info.complete);
+            lua_setfield(state, -2, "complete");
+            lua_pushboolean(state, info.dead);
+            lua_setfield(state, -2, "dead");
+            lua_pushnumber(state, info.x);
+            lua_setfield(state, -2, "x");
+            lua_pushnumber(state, info.y);
+            lua_setfield(state, -2, "y");
+            lua_pushnumber(state, info.z);
+            lua_setfield(state, -2, "z");
+            return 1;
+        }
+
+        // rwe.heal(unit, amount): queue hit points for a living, finished
+        // unit. Applied at the end of the tick, capped at its maximum.
+        static int healFunction(lua_State* state)
+        {
+            auto* context = *static_cast<Context**>(lua_getextraspace(state));
+            auto* impl = context->impl;
+            UnitId unit(0);
+            if (!unitIdAt(state, 1, unit))
+            {
+                return luaL_error(state, "heal needs a unit id");
+            }
+            if (!lua_isinteger(state, 2) || lua_tointeger(state, 2) < 0
+                || lua_tointeger(state, 2) > static_cast<lua_Integer>(1000000000))
+            {
+                return luaL_error(state, "heal needs a whole amount from 0 to 1000000000");
+            }
+            if (impl->world.unitExists && !impl->world.unitExists(impl->world.context, unit))
+            {
+                return luaL_error(state, "heal: no unit %d", static_cast<int>(unit.value));
+            }
+            if (impl->effects.size() >= impl->limits.maxPendingEffects)
+            {
+                return luaL_error(state, "too many pending effects");
+            }
+            {
+                ModEffect effect;
+                effect.kind = ModEffect::Kind::Heal;
+                effect.packageId = impl->packages[context->index].spec.id;
+                effect.unit = unit;
+                effect.amount = static_cast<unsigned int>(lua_tointeger(state, 2));
+                impl->effects.push_back(std::move(effect));
+            }
+            return 0;
+        }
+
+        // rwe.unit_get(unit, key) -> value or nil, from this package's
+        // namespace in the per-unit scope.
+        static int unitGetFunction(lua_State* state)
+        {
+            auto* context = *static_cast<Context**>(lua_getextraspace(state));
+            auto* impl = context->impl;
+            UnitId unit(0);
+            if (!unitIdAt(state, 1, unit))
+            {
+                return luaL_error(state, "unit_get needs a unit id");
+            }
+            std::size_t keyLength = 0;
+            const char* keyText = luaL_checklstring(state, 2, &keyLength);
+            pushModLuaValue(state,
+                impl->store->getUnit(impl->packages[context->index].spec.id, unit, std::string(keyText, keyLength)));
+            return 1;
+        }
+
+        // rwe.unit_set(unit, key, value). Refused for a unit that does not
+        // exist: an entry for a free id would be inherited by the next unit
+        // built in that slot. Entries go with the unit (deleteDeadUnits).
+        static int unitSetFunction(lua_State* state)
+        {
+            auto* context = *static_cast<Context**>(lua_getextraspace(state));
+            auto* impl = context->impl;
+            UnitId unit(0);
+            if (!unitIdAt(state, 1, unit))
+            {
+                return luaL_error(state, "unit_set needs a unit id");
+            }
+            std::size_t keyLength = 0;
+            const char* keyText = luaL_checklstring(state, 2, &keyLength);
+            const auto kind = modLuaValueKind(state, 3);
+            if (kind == ModLuaValueKind::Invalid)
+            {
+                return luaL_error(state, "unit_set value must be a number, string or boolean");
+            }
+            if (kind == ModLuaValueKind::NonFinite)
+            {
+                return luaL_error(state, "unit_set value must be finite");
+            }
+            if (impl->world.unitExists && !impl->world.unitExists(impl->world.context, unit))
+            {
+                return luaL_error(state, "unit_set: no unit %d", static_cast<int>(unit.value));
+            }
+            bool stored = false;
+            {
+                stored = impl->store->setUnit(impl->packages[context->index].spec.id,
+                    unit,
+                    std::string(keyText, keyLength),
+                    modLuaValueAt(state, 3, kind));
+            }
+            if (!stored)
+            {
+                return luaL_error(state, "store quota exceeded");
             }
             return 0;
         }
@@ -393,6 +537,33 @@ namespace rwe
             return true;
         }
 
+        // Calls `name` in one package if it exports it. pushArguments pushes
+        // the arguments and returns how many; nothing it pushes is C++.
+        template <typename PushArguments>
+        void callEvent(std::size_t index, const char* name, PushArguments pushArguments)
+        {
+            auto& package = packages[index];
+            if (package.disabled)
+            {
+                return;
+            }
+            auto* state = package.state;
+            lua_getglobal(state, name);
+            if (!lua_isfunction(state, -1))
+            {
+                lua_pop(state, 1);
+                return;
+            }
+            const int arguments = pushArguments(state);
+            package.remaining = limits.instructionBudgetPerCall;
+            if (lua_pcall(state, arguments, 0, 0) != LUA_OK)
+            {
+                const char* message = lua_tostring(state, -1);
+                disable(package, message ? message : std::string(name) + " failed");
+                lua_pop(state, 1);
+            }
+        }
+
         void callTick(std::size_t index, unsigned int tick)
         {
             auto& package = packages[index];
@@ -422,6 +593,12 @@ namespace rwe
         ModStateStore* store;
         ModRuntimeLimits limits;
         std::vector<std::string> logLines;
+        // Not runtime state: the caller sets it from the simulation's own
+        // clock before every dispatch, so nothing about it needs saving.
+        unsigned int currentTick = 0;
+        ModRuntimeWorld world;
+        // Runtime state: saved, hashed and restored with the rest.
+        std::vector<ModEffect> effects;
     };
 
     ModRuntime::ModRuntime(std::vector<ModRuntimePackage> packages, std::uint32_t seed, ModStateStore& store, ModRuntimeLimits limits)
@@ -431,11 +608,66 @@ namespace rwe
 
     ModRuntime::~ModRuntime() = default;
 
+    void ModRuntime::bind(unsigned int tick, const ModRuntimeWorld& world)
+    {
+        impl_->currentTick = tick;
+        impl_->world = world;
+    }
+
+    void ModRuntime::bind(unsigned int tick, const void* context, ModRuntimeUnitExists unitExists)
+    {
+        bind(tick, ModRuntimeWorld{context, unitExists, nullptr});
+    }
+
     void ModRuntime::onTick(unsigned int tick)
     {
+        impl_->currentTick = tick;
         for (std::size_t i = 0; i < impl_->packages.size(); ++i)
         {
             impl_->callTick(i, tick);
+        }
+    }
+
+    void ModRuntime::onUnitCreated(UnitId unit, PlayerId owner, const std::string& unitType)
+    {
+        for (std::size_t i = 0; i < impl_->packages.size(); ++i)
+        {
+            impl_->callEvent(i, "on_unit_created", [&](lua_State* state) {
+                lua_pushinteger(state, static_cast<lua_Integer>(unit.value));
+                lua_pushinteger(state, static_cast<lua_Integer>(owner.value));
+                lua_pushlstring(state, unitType.data(), unitType.size());
+                return 3;
+            });
+        }
+    }
+
+    void ModRuntime::onUnitCompleted(UnitId unit)
+    {
+        for (std::size_t i = 0; i < impl_->packages.size(); ++i)
+        {
+            impl_->callEvent(i, "on_unit_completed", [&](lua_State* state) {
+                lua_pushinteger(state, static_cast<lua_Integer>(unit.value));
+                return 1;
+            });
+        }
+    }
+
+    void ModRuntime::onUnitKilled(UnitId unit, std::optional<UnitId> attacker)
+    {
+        for (std::size_t i = 0; i < impl_->packages.size(); ++i)
+        {
+            impl_->callEvent(i, "on_unit_killed", [&](lua_State* state) {
+                lua_pushinteger(state, static_cast<lua_Integer>(unit.value));
+                if (attacker)
+                {
+                    lua_pushinteger(state, static_cast<lua_Integer>(attacker->value));
+                }
+                else
+                {
+                    lua_pushnil(state);
+                }
+                return 2;
+            });
         }
     }
 
@@ -447,6 +679,13 @@ namespace rwe
             impl_->callDamage(i, victim, attacker, amount, paralyzer, result);
         }
         return result;
+    }
+
+    std::vector<ModEffect> ModRuntime::takeEffects()
+    {
+        std::vector<ModEffect> taken;
+        taken.swap(impl_->effects);
+        return taken;
     }
 
     ModStateStore& ModRuntime::store() { return *impl_->store; }
@@ -484,6 +723,18 @@ namespace rwe
         }
         root["rng"] = std::move(rng);
         root["store"] = impl_->store->toJson();
+        if (!impl_->effects.empty())
+        {
+            json effects = json::array();
+            for (const auto& effect : impl_->effects)
+            {
+                effects.push_back({{"kind", "heal"},
+                    {"package", effect.packageId},
+                    {"unit", effect.unit.value},
+                    {"amount", effect.amount}});
+            }
+            root["effects"] = std::move(effects);
+        }
         return root;
     }
 
@@ -516,10 +767,33 @@ namespace rwe
                 }
             }
         }
+        std::vector<ModEffect> effects;
+        if (value.contains("effects"))
+        {
+            if (!value["effects"].is_array() || value["effects"].size() > impl_->limits.maxPendingEffects)
+            {
+                throw std::runtime_error("mod runtime: effects must be an array within the pending limit");
+            }
+            for (const auto& item : value["effects"])
+            {
+                if (!item.is_object() || item.value("kind", std::string()) != "heal"
+                    || !item.contains("unit") || !item["unit"].is_number_unsigned()
+                    || !item.contains("amount") || !item["amount"].is_number_unsigned())
+                {
+                    throw std::runtime_error("mod runtime: malformed pending effect");
+                }
+                ModEffect effect;
+                effect.packageId = item.value("package", std::string());
+                effect.unit = UnitId(item["unit"].get<unsigned int>());
+                effect.amount = item["amount"].get<unsigned int>();
+                effects.push_back(std::move(effect));
+            }
+        }
         if (value.contains("store"))
         {
             impl_->store->loadJson(value["store"]);
         }
+        impl_->effects = std::move(effects);
     }
 
     std::string ModRuntime::hash() const

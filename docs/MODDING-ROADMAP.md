@@ -206,7 +206,12 @@ Windows/Linux network acceptance run.
 
 Progress 2026-11-04 (local, not yet compiled): "play it" now has a path that
 needs no launcher work: `rwe --map <name> --mod <rwe_mod.json>` (MOD-SDK-015).
-The launcher still has to pass it.
+The launcher now lists format-1 packages, archives or not, and passes each
+selected one as `--mod` (MOD-SDK-022).
+"Share it" waits on package installation (#765, PACKAGE-007): `rwe_setup`'s
+`--install-package` is still a placeholder, so an exported archive would have
+nothing on the receiving side to install it. Packaging belongs with that work,
+not ahead of it.
 
 ### MOD-08: Introduce runtime rules and authoritative script state
 
@@ -233,6 +238,17 @@ stream are reachable, a fault disables the package, and save/hash/dump carry
 the metadata (MOD-SDK-009). Still open: the shield/mission example, lifecycle
 hooks, unit queries and deferred effects; reclaim, feature and remote damage
 still bypass the unit hook.
+
+Progress 2026-11-04 (#970, local branch `970-shield-example`): runtime scripts
+can keep per-unit state (`rwe.unit_get`/`rwe.unit_set`) and read the tick
+(`rwe.tick()`) behind `runtime.unit-state@1`. Per-unit entries are deleted with
+the unit, and the shipped `examples/mod-shield-runtime` survives save/resume in
+tests. Recorded in MOD-SDK-016. Lifecycle events (`on_unit_created`,
+`on_unit_completed`, `on_unit_killed`) follow behind `runtime.lifecycle@1`
+(MOD-SDK-017), and `rwe.unit_info` behind `runtime.unit-query@1` (MOD-SDK-018).
+Which damage the hook folds is decided in MOD-SDK-019. Deferred effects
+start with `rwe.heal` behind `runtime.effects@1` (MOD-SDK-020).
+Still open: more effect kinds and the two-peer acceptance run.
 
 ### MOD-09: Add Lua AI through the lockstep controller path
 
@@ -274,6 +290,12 @@ RNG position and the private Lua state; rejoin catch-up and handover; the
 mixed-seat delayed-packet and cross-build acceptance runs; replay using a
 recorded stream without a second producer; and assigning a specific AI package
 to a specific seat. **MOD-09 is not complete.**
+
+Progress 2026-11-04 (#971, local, not yet compiled): a Lua seat's RNG
+position, fault flag and `ai.store` survive a save, are hashed and appear in
+desync dumps, through new `AiController::saveState/loadState/stateHash`.
+Native seats still rebuild on load. Recorded in MOD-SDK-021. Rejoin, replay
+without a second producer and the acceptance runs remain open.
 
 ### MOD-10: Expose presentation safely
 

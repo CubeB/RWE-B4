@@ -22,6 +22,8 @@ export interface LauncherHomeProps {
   playerName: string;
   activeMods: string[];
   installedMods: string[];
+  /** Per mod name, what its manifest says it is (MOD-SDK-022). */
+  modSummaries?: Record<string, string>;
   launchEnabled: boolean;
   running: boolean;
   communityPatch: boolean;
@@ -244,7 +246,13 @@ export function LauncherHome(props: LauncherHomeProps) {
             {props.activeMods.map(mod => (
               <Chip
                 key={mod}
-                label={mod === "ta" ? "Total Annihilation data" : mod}
+                label={
+                  mod === "ta"
+                    ? "Total Annihilation data"
+                    : props.modSummaries?.[mod]
+                      ? `${mod} \u00b7 ${props.modSummaries[mod]}`
+                      : mod
+                }
                 variant="outlined"
               />
             ))}

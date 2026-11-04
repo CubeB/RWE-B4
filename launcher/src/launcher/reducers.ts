@@ -20,7 +20,7 @@ import { GameListEntry, MasterClientState } from "./masterClient/state";
 import { reduceReducers, liftState, withSideEffects } from "./sideEffects";
 import { choose } from "../common/util";
 import { normalizePlayerName } from "./preferences";
-import { resourceDirectoriesForMods } from "../common/mods";
+import { modArgs, resourceDirectoriesForMods } from "../common/mods";
 
 const initialState: State = {
   masterClient: {
@@ -266,6 +266,7 @@ function globalActionsReducer(
             playerName: state.playerName,
             dataPaths: selectedMods.map(x => x.path),
             resourceDirectories: resourceSelection.resourceDirectories,
+            ...modArgs(selectedMods),
             communityPatch: state.communityPatch,
           },
         }

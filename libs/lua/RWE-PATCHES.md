@@ -25,3 +25,18 @@ expose untrusted remote strings to it.
 No other source file is modified. The seed pin is part of the modding SDK's
 determinism contract (docs/MODDING-SDK-FINDINGS.md MOD-SDK-004) and must not
 be removed when updating Lua without updating that entry.
+
+## Build: compiled as C++ (`CMakeLists.txt`)
+
+Every Lua source is compiled as C++ (`LANGUAGE CXX`). No source file is
+changed for it: Lua supports this itself, and `ldo.c` then raises errors as
+C++ exceptions rather than with `longjmp`.
+
+Why: RWE's host functions are C++. Built as C, an error raised from one of
+them (`luaL_error`, `luaL_check*`) is a `longjmp` across C++ frames, which is
+undefined behaviour. It killed MSVC Release test runs outright, while gcc,
+clang and MSVC Debug happened to survive it. As C++, the same error is an
+exception, so the frames unwind and their destructors run. RWE includes the
+Lua headers without `extern "C"`, because the symbols now have C++ linkage.
+MOD-SDK-023 in `docs/MODDING-SDK-FINDINGS.md` records it.
+
