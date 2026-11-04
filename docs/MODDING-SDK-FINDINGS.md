@@ -1195,6 +1195,36 @@ necessary the day the lobby lets a room choose options. It should land with
 that feature, so that the room's chosen options are what is compared, not
 added now as a second copy of the same check.
 
+## MOD-SDK-023: Lua is built as C++
+
+Status: implemented 2026-11-04 on `970-shield-example`. RWE-original build
+policy; no byte-tactics comparison applies. Verified locally on MinGW64 gcc
+16.2; MSVC is CI's to confirm.
+
+MSVC Release test runs died -- every time, and only there -- inside whichever
+`unit_set` refusal test ran first. First the NaN case, then, once that was
+hardened, the nil case. Each is a `luaL_error` raised from a C++ host
+function. With Lua built as C, that is a `longjmp` across a C++ frame, which
+the C++ standard leaves undefined. gcc, clang and MSVC Debug survived it;
+MSVC Release did not.
+
+`libs/lua/CMakeLists.txt` now compiles the vendored sources as C++. Lua
+supports that unchanged: `ldo.c` switches `LUAI_THROW` to `throw` and
+`LUAI_TRY` to `try`/`catch(...)`, so an error unwinds RWE's frames as an
+exception, destructors included. The five RWE files that include Lua's headers
+(`ModRuntime`, `ModTransform`, `ModAiController`, `ModLuaValues` and
+`PresentationRuntime`) no longer wrap them in `extern "C"`.
+
+Behaviour is unchanged: the same source, the same fixed hash seed (the
+`lstate.c` patch) and the same arithmetic. Only how an error travels back to
+`lua_pcall` changes. One consequence worth knowing: a C++ exception thrown by
+a host function is now caught by Lua's `catch(...)` and comes back from
+`lua_pcall` as an error, so the package is disabled rather than the process
+terminated.
+
+MOD-SDK-016's rule -- no C++ object alive at a `luaL_error` -- stays good
+practice, but it is no longer what keeps the engine safe.
+
 ## Verification
 
 Executed 2026-11-02: `rwe_test "[modsdk]"` and the full `rwe_test` suite; the

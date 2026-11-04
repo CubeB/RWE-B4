@@ -3,10 +3,8 @@
 #include <limits>
 #include <string>
 
-extern "C"
-{
+// Lua is built as C++ (MOD-SDK-023), so its headers are included as C++.
 #include <lua.h>
-}
 
 namespace rwe
 {

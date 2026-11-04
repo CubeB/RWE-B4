@@ -13,12 +13,10 @@
 #include <utility>
 #include <rwe/util/Sha256.h>
 
-extern "C"
-{
+// Lua is built as C++ (MOD-SDK-023), so its headers are included as C++.
 #include <lauxlib.h>
 #include <lua.h>
 #include <lualib.h>
-}
 
 using json = nlohmann::json;
 
