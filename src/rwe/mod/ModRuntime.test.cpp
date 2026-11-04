@@ -292,4 +292,50 @@ namespace rwe
         CHECK(afterResume == uninterrupted);
         CHECK(resumed.hash() == runtime.hash());
     }
+
+    TEST_CASE("unit lifecycle events reach the scripts that export them", "[modsdk][modruntime]")
+    {
+        Fixture fixture({
+            package("a.events", R"(
+                function on_unit_created(unit, owner, unitType)
+                    rwe.store_set("created", unit .. ":" .. owner .. ":" .. unitType)
+                end
+                function on_unit_completed(unit)
+                    rwe.store_set("completed", unit)
+                end
+                function on_unit_killed(unit, attacker)
+                    rwe.store_set("killed", unit .. ":" .. tostring(attacker))
+                end
+            )"),
+            // A package that exports none of them is simply not called.
+            package("b.quiet", "function on_tick(tick) end"),
+        });
+
+        fixture.runtime.onUnitCreated(UnitId(3), PlayerId(1), "ARMPW");
+        fixture.runtime.onUnitCompleted(UnitId(3));
+        fixture.runtime.onUnitKilled(UnitId(3), UnitId(8));
+        REQUIRE(fixture.runtime.disabledPackages().empty());
+
+        CHECK(fixture.store.getGlobal("a.events", "created")->bytes == "3:1:ARMPW");
+        CHECK(fixture.store.getGlobal("a.events", "completed")->f32 == 3.0f);
+        CHECK(fixture.store.getGlobal("a.events", "killed")->bytes == "3:8");
+
+        // No attacker arrives as nil, not as a unit id that could be real.
+        fixture.runtime.onUnitKilled(UnitId(4), std::nullopt);
+        CHECK(fixture.store.getGlobal("a.events", "killed")->bytes == "4:nil");
+    }
+
+    TEST_CASE("a faulting lifecycle event disables its package", "[modsdk][modruntime]")
+    {
+        Fixture fixture({
+            package("a.bad", "function on_unit_killed(unit, attacker) error('no') end"),
+            package("b.good", "function on_unit_killed(unit, attacker) rwe.store_set('n', unit) end"),
+        });
+
+        fixture.runtime.onUnitKilled(UnitId(5), std::nullopt);
+        const auto disabled = fixture.runtime.disabledPackages();
+        REQUIRE(disabled.size() == 1);
+        CHECK(disabled[0] == "a.bad");
+        CHECK(fixture.store.getGlobal("b.good", "n")->f32 == 5.0f);
+    }
 }

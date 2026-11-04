@@ -295,6 +295,37 @@ namespace rwe
         return static_cast<const GameSimulation*>(simulation)->unitExists(unit);
     }
 
+    void GameSimulation::notifyModUnitCreated(UnitId unit)
+    {
+        if (!modRuntime_)
+        {
+            return;
+        }
+        const auto& state = getUnitState(unit);
+        modRuntime_->bind(gameTime.value, this, &GameSimulation::modRuntimeUnitExists);
+        modRuntime_->onUnitCreated(unit, state.owner, state.unitType);
+    }
+
+    void GameSimulation::notifyModUnitCompleted(UnitId unit)
+    {
+        if (!modRuntime_)
+        {
+            return;
+        }
+        modRuntime_->bind(gameTime.value, this, &GameSimulation::modRuntimeUnitExists);
+        modRuntime_->onUnitCompleted(unit);
+    }
+
+    void GameSimulation::notifyModUnitKilled(UnitId unit, std::optional<UnitId> attacker)
+    {
+        if (!modRuntime_)
+        {
+            return;
+        }
+        modRuntime_->bind(gameTime.value, this, &GameSimulation::modRuntimeUnitExists);
+        modRuntime_->onUnitKilled(unit, attacker);
+    }
+
     void GameSimulation::setEconomyProvider(std::unique_ptr<EconomyProvider> provider)
     {
         economyProvider_ = std::move(provider);
@@ -785,6 +816,7 @@ namespace rwe
         {
             missionRules->unitDying(*this, targetId, unit.owner);
         }
+        notifyModUnitKilled(targetId, std::nullopt);
         unit.markAsDeadNoCorpse();
         cancelFactoryProductOnDeath(*this, targetId);
         recordUnitDeath(*this, targetId, "reclaimed", std::nullopt);
@@ -994,6 +1026,7 @@ namespace rwe
         {
             missionRules->unitDying(*this, unitId, unit.owner);
         }
+        notifyModUnitKilled(unitId, std::nullopt);
 
         // Self-destruction leaves nothing to reclaim.
         unit.markAsDeadNoCorpse();
@@ -1614,6 +1647,7 @@ namespace rwe
         {
             missionRules->unitDying(*this, unitId, unit.owner);
         }
+        notifyModUnitKilled(unitId, std::nullopt);
         unit.markAsDeadNoCorpse();
         cancelFactoryProductOnDeath(*this, unitId);
         if (countAsLoss)
@@ -2040,6 +2074,7 @@ namespace rwe
         {
             missionRules->unitDying(*this, unitId, unit.owner);
         }
+        notifyModUnitKilled(unitId, attacker);
         unit.markAsDead();
         cancelFactoryProductOnDeath(*this, unitId);
         getPlayer(unit.owner).unitsLost += 1;

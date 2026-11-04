@@ -593,4 +593,54 @@ namespace rwe
         CHECK_FALSE(sim.modState()->getUnit("a.mark", id, "hit"));
         CHECK(sim.modState()->entriesFor("a.mark") == 0);
     }
+
+    TEST_CASE("the simulation reports deaths and creations to runtime mods", "[damage][modruntime]")
+    {
+        auto script = makeDamageScript();
+        GameSimulation sim(makeDamageTerrain(64, 64), 0u, 0, 0);
+        auto us = addDamagePlayer(sim, "us");
+        auto them = addDamagePlayer(sim, "them");
+        registerDamageModel(sim, "model");
+        sim.unitDefinitions["plain"] = makeTargetDef(1000000);
+        auto attackerId = spawnDamageUnit(sim, "plain", us, SimVector(64_ss, 0_ss, 0_ss), script);
+        auto victim = spawnDamageUnit(sim, "plain", them, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto quiet = spawnDamageUnit(sim, "plain", them, SimVector(0_ss, 0_ss, 64_ss), script);
+
+        sim.setModState(std::make_unique<ModStateStore>());
+        sim.setModRuntime(std::make_unique<ModRuntime>(
+            std::vector<ModRuntimePackage>{
+                {"a.events", "a.events/scripts/main.lua",
+                    R"(
+                    function on_unit_created(unit, owner, unitType)
+                        rwe.store_set("created", unitType)
+                    end
+                    function on_unit_killed(unit, attacker)
+                        -- The unit is still there, so its own state is writable.
+                        rwe.unit_set(unit, "dying", true)
+                        rwe.store_set("killed:" .. unit, tostring(attacker))
+                    end
+                    )",
+                    nlohmann::json::object()}},
+            7,
+            *sim.modState()));
+
+        sim.notifyModUnitCreated(victim);
+        CHECK(sim.modState()->getGlobal("a.events", "created")->bytes == "plain");
+
+        sim.killUnit(victim, attackerId);
+        sim.quietlyKillUnit(quiet);
+        REQUIRE(sim.modRuntime()->disabledPackages().empty());
+        CHECK(sim.modState()->getGlobal("a.events", "killed:" + std::to_string(victim.value))->bytes
+            == std::to_string(attackerId.value));
+        CHECK(sim.modState()->getGlobal("a.events", "killed:" + std::to_string(quiet.value))->bytes == "nil");
+        CHECK(sim.modState()->getUnit("a.events", victim, "dying"));
+
+        // A unit dies once, and so is reported once.
+        sim.killUnit(victim, attackerId);
+        CHECK(sim.modRuntime()->disabledPackages().empty());
+
+        // What the hook wrote on the dying unit goes with it.
+        sim.deleteDeadUnits();
+        CHECK_FALSE(sim.modState()->getUnit("a.events", victim, "dying"));
+    }
 }

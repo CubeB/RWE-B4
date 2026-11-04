@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <nlohmann/json.hpp>
 #include <rwe/mod/ModStateStore.h>
 #include <string>
@@ -59,6 +60,15 @@ namespace rwe
         // its runtime is attached and a stored pointer to it would dangle.
         // Never bound (isolated tests): tick 0, and every unit id accepted.
         void bind(unsigned int tick, const void* context, ModRuntimeUnitExists unitExists);
+
+        // Unit lifecycle events (MOD-SDK-017), in load order, to packages that
+        // export them. A fault disables the package, as for on_tick.
+        //   on_unit_created(unit, owner, unitType)  unitType is the FBI name
+        //   on_unit_completed(unit)
+        //   on_unit_killed(unit, attacker)  attacker is nil when there is none
+        void onUnitCreated(UnitId unit, PlayerId owner, const std::string& unitType);
+        void onUnitCompleted(UnitId unit);
+        void onUnitKilled(UnitId unit, std::optional<UnitId> attacker);
 
         // A fold over packages that export hook_damage_v1:
         //   hook_damage_v1(victim, attacker, amount, paralyzer, prev) -> number

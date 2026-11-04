@@ -552,6 +552,33 @@ namespace rwe
             return true;
         }
 
+        // Calls `name` in one package if it exports it. pushArguments pushes
+        // the arguments and returns how many; nothing it pushes is C++.
+        template <typename PushArguments>
+        void callEvent(std::size_t index, const char* name, PushArguments pushArguments)
+        {
+            auto& package = packages[index];
+            if (package.disabled)
+            {
+                return;
+            }
+            auto* state = package.state;
+            lua_getglobal(state, name);
+            if (!lua_isfunction(state, -1))
+            {
+                lua_pop(state, 1);
+                return;
+            }
+            const int arguments = pushArguments(state);
+            package.remaining = limits.instructionBudgetPerCall;
+            if (lua_pcall(state, arguments, 0, 0) != LUA_OK)
+            {
+                const char* message = lua_tostring(state, -1);
+                disable(package, message ? message : std::string(name) + " failed");
+                lua_pop(state, 1);
+            }
+        }
+
         void callTick(std::size_t index, unsigned int tick)
         {
             auto& package = packages[index];
@@ -608,6 +635,49 @@ namespace rwe
         for (std::size_t i = 0; i < impl_->packages.size(); ++i)
         {
             impl_->callTick(i, tick);
+        }
+    }
+
+    void ModRuntime::onUnitCreated(UnitId unit, PlayerId owner, const std::string& unitType)
+    {
+        for (std::size_t i = 0; i < impl_->packages.size(); ++i)
+        {
+            impl_->callEvent(i, "on_unit_created", [&](lua_State* state) {
+                lua_pushinteger(state, static_cast<lua_Integer>(unit.value));
+                lua_pushinteger(state, static_cast<lua_Integer>(owner.value));
+                lua_pushlstring(state, unitType.data(), unitType.size());
+                return 3;
+            });
+        }
+    }
+
+    void ModRuntime::onUnitCompleted(UnitId unit)
+    {
+        for (std::size_t i = 0; i < impl_->packages.size(); ++i)
+        {
+            impl_->callEvent(i, "on_unit_completed", [&](lua_State* state) {
+                lua_pushinteger(state, static_cast<lua_Integer>(unit.value));
+                return 1;
+            });
+        }
+    }
+
+    void ModRuntime::onUnitKilled(UnitId unit, std::optional<UnitId> attacker)
+    {
+        for (std::size_t i = 0; i < impl_->packages.size(); ++i)
+        {
+            impl_->callEvent(i, "on_unit_killed", [&](lua_State* state) {
+                lua_pushinteger(state, static_cast<lua_Integer>(unit.value));
+                if (attacker)
+                {
+                    lua_pushinteger(state, static_cast<lua_Integer>(attacker->value));
+                }
+                else
+                {
+                    lua_pushnil(state);
+                }
+                return 2;
+            });
         }
     }
 

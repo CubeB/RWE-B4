@@ -933,10 +933,51 @@ the same way on every peer.
 
 ### Still open for #970
 
-Lifecycle hooks (created, completed, killed); filtered unit, projectile and
+Lifecycle hooks (added in MOD-SDK-017); filtered unit, projectile and
 player queries; deferred effects; a decision on reclaim, feature and remote
 damage, which still bypass the unit hook; and the two-peer and
 `net-test.py` acceptance runs.
+
+## MOD-SDK-017: unit lifecycle events
+
+Status: implemented 2026-11-04 on `970-shield-example`, after MOD-SDK-016.
+Issue #970, partly. RWE-original; inherits MOD-SDK-001's boundary, and no
+byte-tactics comparison applies. Not compiled locally; CI is the build.
+
+Behind `runtime.lifecycle@1`, a runtime package may export:
+
+| Event | Arguments | Raised |
+| --- | --- | --- |
+| `on_unit_created` | unit, owner, unitType | in `trySpawnUnit`, beside `UnitSpawnedEvent`: every new unit, a nanoframe included |
+| `on_unit_completed` | unit | when a builder finishes a unit (both build paths in `UnitBehaviorService`), when a unit is spawned complete (`trySpawnCompletedUnit`), and when a resurrection raises one |
+| `on_unit_killed` | unit, attacker | on the four real death paths -- killed, quietly killed, reclaimed, self-destructed -- beside the mission rules' `unitDying`, before the unit is marked dead |
+
+- `unitType` is the FBI unit name, never a table index, for the same reason
+  the sync hash reads names: a definition index depends on what is in each
+  machine's data folder.
+- `attacker` is `nil` when there is none. `hook_damage_v1` passes 0 for a
+  missing attacker, but 0 can be a real unit id, so the new events do not copy
+  that.
+- A killed unit still exists when its event runs, so the script can read and
+  write its per-unit state. That state is then deleted with the unit
+  (MOD-SDK-016).
+- A capture is not reported as a death. The mission rules hear one, because
+  the original raises a cause-4 death of the old unit, but the unit id lives
+  on under its new owner, and telling a mod it died would be false.
+- Loading a save places units directly (`save_util.cpp`), not through
+  `trySpawnUnit`, so no event is raised again on resume. A replay re-runs the
+  simulation, so it raises them exactly as the recorded game did.
+- Each event binds the runtime first (`ModRuntime::bind`), so `rwe.tick()` and
+  the `unit_set` existence check work inside it. A fault disables the
+  package, as for `on_tick`.
+
+Events run synchronously at the point where they are raised, inside the tick.
+A script can change nothing in the simulation from them except its own store
+entries, so their position inside the tick decides only what the script can
+read, never what any native phase does.
+
+Still open for #970: filtered queries, deferred effects, the limb-damage
+decision and the two-peer acceptance run.
 
 ## Verification
 

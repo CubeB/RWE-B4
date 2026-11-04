@@ -877,6 +877,12 @@ namespace rwe
         // ModRuntime::bind's unit-exists check, with this simulation as the
         // context. Static, so the runtime holds a plain function pointer.
         static bool modRuntimeUnitExists(const void* simulation, UnitId unit);
+        // MOD-SDK-017: unit lifecycle events for runtime mods. Each does
+        // nothing without a runtime. Public because UnitBehaviorService
+        // completes units on the simulation's behalf.
+        void notifyModUnitCreated(UnitId unit);
+        void notifyModUnitCompleted(UnitId unit);
+        void notifyModUnitKilled(UnitId unit, std::optional<UnitId> attacker);
         EconomyProvider* economyProvider() { return economyProvider_.get(); }
         const EconomyProvider* economyProvider() const { return economyProvider_.get(); }
         void setEconomyProvider(std::unique_ptr<EconomyProvider> provider);

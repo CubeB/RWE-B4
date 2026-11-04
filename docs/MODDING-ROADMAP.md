@@ -238,8 +238,10 @@ Progress 2026-11-04 (#970, local branch `970-shield-example`): runtime scripts
 can keep per-unit state (`rwe.unit_get`/`rwe.unit_set`) and read the tick
 (`rwe.tick()`) behind `runtime.unit-state@1`. Per-unit entries are deleted with
 the unit, and the shipped `examples/mod-shield-runtime` survives save/resume in
-tests. Recorded in MOD-SDK-016. Still open: lifecycle hooks, unit queries,
-deferred effects, the limb-damage decision and the two-peer acceptance run.
+tests. Recorded in MOD-SDK-016. Lifecycle events (`on_unit_created`,
+`on_unit_completed`, `on_unit_killed`) follow behind `runtime.lifecycle@1`
+(MOD-SDK-017). Still open: unit queries, deferred effects, the limb-damage
+decision and the two-peer acceptance run.
 
 ### MOD-09: Add Lua AI through the lockstep controller path
 

@@ -293,6 +293,7 @@ namespace rwe
             }
 
             events.push_back(UnitSpawnedEvent{*unitId});
+            notifyModUnitCreated(*unitId);
         }
 
         return unitId;
@@ -305,6 +306,7 @@ namespace rwe
         {
             auto& unit = getUnitState(*unitId);
             unit.finishBuilding(unitDefinitions.at(unit.unitType));
+            notifyModUnitCompleted(*unitId);
         }
         return unitId;
     }
