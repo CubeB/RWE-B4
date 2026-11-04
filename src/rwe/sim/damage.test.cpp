@@ -643,4 +643,40 @@ namespace rwe
         sim.deleteDeadUnits();
         CHECK_FALSE(sim.modState()->getUnit("a.events", victim, "dying"));
     }
+
+    TEST_CASE("unit_info reads the simulation's own unit", "[damage][modruntime]")
+    {
+        auto script = makeDamageScript();
+        GameSimulation sim(makeDamageTerrain(64, 64), 0u, 0, 0);
+        auto them = addDamagePlayer(sim, "them");
+        registerDamageModel(sim, "model");
+        sim.unitDefinitions["plain"] = makeTargetDef(1000000);
+        auto id = spawnDamageUnit(sim, "plain", them, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        sim.setModState(std::make_unique<ModStateStore>());
+        sim.setModRuntime(std::make_unique<ModRuntime>(
+            std::vector<ModRuntimePackage>{
+                {"a.look", "a.look/scripts/main.lua",
+                    R"(
+                    function hook_damage_v1(v, a, amount, paralyzer, prev)
+                        local info = rwe.unit_info(v)
+                        rwe.store_set("type", info.type)
+                        rwe.store_set("owner", info.owner)
+                        rwe.store_set("max", info.max_health)
+                        rwe.store_set("none", tostring(rwe.unit_info(v + 1000)))
+                        return prev
+                    end
+                    )",
+                    nlohmann::json::object()}},
+            7,
+            *sim.modState()));
+
+        sim.applyDamage(id, 10);
+        REQUIRE(sim.modRuntime()->disabledPackages().empty());
+        CHECK(sim.modState()->getGlobal("a.look", "type")->bytes == "plain");
+        CHECK(sim.modState()->getGlobal("a.look", "owner")->f32 == static_cast<float>(them.value));
+        CHECK(sim.modState()->getGlobal("a.look", "max")->f32
+            == static_cast<float>(sim.unitDefinitions.at("plain").maxHitPoints));
+        CHECK(sim.modState()->getGlobal("a.look", "none")->bytes == "nil");
+    }
 }

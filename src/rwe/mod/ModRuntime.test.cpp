@@ -338,4 +338,54 @@ namespace rwe
         CHECK(disabled[0] == "a.bad");
         CHECK(fixture.store.getGlobal("b.good", "n")->f32 == 5.0f);
     }
+
+    namespace
+    {
+        bool fakeUnitInfo(const void*, UnitId unit, ModUnitInfo& info)
+        {
+            if (unit != UnitId(3))
+            {
+                return false;
+            }
+            info.owner = PlayerId(2);
+            info.unitType = "ARMPW";
+            info.hitPoints = 90;
+            info.maxHitPoints = 120;
+            info.complete = false;
+            info.x = 1.5f;
+            info.y = 0.0f;
+            info.z = -4.0f;
+            return true;
+        }
+    }
+
+    TEST_CASE("unit_info reports a unit, or nil for none", "[modsdk][modruntime]")
+    {
+        Fixture fixture({package("a.look", R"(
+            function hook_damage_v1(v, a, amount, paralyzer, prev)
+                local info = rwe.unit_info(v)
+                if info == nil then
+                    rwe.store_set("seen", "nil")
+                else
+                    rwe.store_set("seen", info.type .. ":" .. info.owner .. ":" .. info.health .. "/"
+                        .. info.max_health .. ":" .. tostring(info.complete) .. ":" .. tostring(info.dead)
+                        .. ":" .. info.x .. "," .. info.z)
+                end
+                return prev
+            end
+        )")});
+
+        // Bound without a unit_info source: every unit reads as nil.
+        fixture.runtime.bind(1, nullptr, nullptr);
+        fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 1.0f, false);
+        CHECK(fixture.store.getGlobal("a.look", "seen")->bytes == "nil");
+
+        fixture.runtime.bind(1, ModRuntimeWorld{nullptr, nullptr, &fakeUnitInfo});
+        fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 1.0f, false);
+        CHECK(fixture.store.getGlobal("a.look", "seen")->bytes == "ARMPW:2:90/120:false:false:1.5,-4.0");
+
+        fixture.runtime.adjustDamage(UnitId(7), UnitId(4), 1.0f, false);
+        CHECK(fixture.store.getGlobal("a.look", "seen")->bytes == "nil");
+        CHECK(fixture.runtime.disabledPackages().empty());
+    }
 }

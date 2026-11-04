@@ -34,6 +34,34 @@ namespace rwe
     // Whether `unit` exists in the simulation `context` points at.
     using ModRuntimeUnitExists = bool (*)(const void* context, UnitId unit);
 
+    // What rwe.unit_info reports (MOD-SDK-018). Runtime rules run on every
+    // peer over the whole simulation, so nothing here is filtered by sight.
+    struct ModUnitInfo
+    {
+        PlayerId owner{0};
+        // The FBI name, never a definition index.
+        std::string unitType;
+        unsigned int hitPoints = 0;
+        unsigned int maxHitPoints = 0;
+        bool complete = true;
+        bool dead = false;
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+    };
+
+    // Fills `info` and returns true when `unit` exists.
+    using ModRuntimeUnitInfo = bool (*)(const void* context, UnitId unit, ModUnitInfo& info);
+
+    // The simulation as a runtime call sees it. Plain function pointers and
+    // a context, bound before every dispatch (see bind).
+    struct ModRuntimeWorld
+    {
+        const void* context = nullptr;
+        ModRuntimeUnitExists unitExists = nullptr;
+        ModRuntimeUnitInfo unitInfo = nullptr;
+    };
+
     class ModRuntime
     {
     public:
@@ -59,6 +87,8 @@ namespace rwe
         // dispatch rather than once, because a GameSimulation is moved after
         // its runtime is attached and a stored pointer to it would dangle.
         // Never bound (isolated tests): tick 0, and every unit id accepted.
+        void bind(unsigned int tick, const ModRuntimeWorld& world);
+        // As above with no unit_info source: unit_info reports nil.
         void bind(unsigned int tick, const void* context, ModRuntimeUnitExists unitExists);
 
         // Unit lifecycle events (MOD-SDK-017), in load order, to packages that

@@ -290,9 +290,39 @@ namespace rwe
         modRuntime_ = std::move(runtime);
     }
 
-    bool GameSimulation::modRuntimeUnitExists(const void* simulation, UnitId unit)
+    namespace
     {
-        return static_cast<const GameSimulation*>(simulation)->unitExists(unit);
+        bool modRuntimeUnitExists(const void* simulation, UnitId unit)
+        {
+            return static_cast<const GameSimulation*>(simulation)->unitExists(unit);
+        }
+
+        bool modRuntimeUnitInfo(const void* simulation, UnitId unit, ModUnitInfo& info)
+        {
+            const auto& sim = *static_cast<const GameSimulation*>(simulation);
+            const auto found = sim.tryGetUnitState(unit);
+            if (!found)
+            {
+                return false;
+            }
+            const auto& state = found->get();
+            const auto& definition = sim.unitDefinitions.at(state.unitType);
+            info.owner = state.owner;
+            info.unitType = state.unitType;
+            info.hitPoints = state.hitPoints;
+            info.maxHitPoints = definition.maxHitPoints;
+            info.complete = !state.isBeingBuilt(definition);
+            info.dead = state.isDead();
+            info.x = simScalarToFloat(state.position.x);
+            info.y = simScalarToFloat(state.position.y);
+            info.z = simScalarToFloat(state.position.z);
+            return true;
+        }
+    }
+
+    void GameSimulation::bindModRuntime()
+    {
+        modRuntime_->bind(gameTime.value, ModRuntimeWorld{this, &modRuntimeUnitExists, &modRuntimeUnitInfo});
     }
 
     void GameSimulation::notifyModUnitCreated(UnitId unit)
@@ -302,7 +332,7 @@ namespace rwe
             return;
         }
         const auto& state = getUnitState(unit);
-        modRuntime_->bind(gameTime.value, this, &GameSimulation::modRuntimeUnitExists);
+        bindModRuntime();
         modRuntime_->onUnitCreated(unit, state.owner, state.unitType);
     }
 
@@ -312,7 +342,7 @@ namespace rwe
         {
             return;
         }
-        modRuntime_->bind(gameTime.value, this, &GameSimulation::modRuntimeUnitExists);
+        bindModRuntime();
         modRuntime_->onUnitCompleted(unit);
     }
 
@@ -322,7 +352,7 @@ namespace rwe
         {
             return;
         }
-        modRuntime_->bind(gameTime.value, this, &GameSimulation::modRuntimeUnitExists);
+        bindModRuntime();
         modRuntime_->onUnitKilled(unit, attacker);
     }
 
@@ -2457,7 +2487,7 @@ namespace rwe
         // surface does: once, half away from zero.
         if (modRuntime_)
         {
-            modRuntime_->bind(gameTime.value, this, &GameSimulation::modRuntimeUnitExists);
+            bindModRuntime();
             const auto adjusted = modRuntime_->adjustDamage(
                 unitId, attacker.value_or(UnitId(0)), static_cast<float>(damage), paralyzer);
             damage = static_cast<int64_t>(std::floor(adjusted + 0.5f));
@@ -3431,7 +3461,7 @@ namespace rwe
         // moves. The hook sees the tick's settled state.
         if (modRuntime_)
         {
-            modRuntime_->bind(gameTime.value, this, &GameSimulation::modRuntimeUnitExists);
+            bindModRuntime();
             modRuntime_->onTick(gameTime.value);
         }
 

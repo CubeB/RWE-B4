@@ -202,6 +202,8 @@ namespace rwe
             lua_setfield(state, -2, "unit_get");
             lua_pushcfunction(state, unitSetFunction);
             lua_setfield(state, -2, "unit_set");
+            lua_pushcfunction(state, unitInfoFunction);
+            lua_setfield(state, -2, "unit_info");
             lua_newtable(state);
             if (package.spec.options.is_object())
             {
@@ -435,6 +437,45 @@ namespace rwe
             return 1;
         }
 
+        // rwe.unit_info(unit) -> a table describing the unit, or nil when
+        // there is no such unit (or nothing to ask).
+        static int unitInfoFunction(lua_State* state)
+        {
+            auto* context = *static_cast<Context**>(lua_getextraspace(state));
+            auto* impl = context->impl;
+            UnitId unit(0);
+            if (!unitIdAt(state, 1, unit))
+            {
+                return luaL_error(state, "unit_info needs a unit id");
+            }
+            ModUnitInfo info;
+            if (!impl->world.unitInfo || !impl->world.unitInfo(impl->world.context, unit, info))
+            {
+                lua_pushnil(state);
+                return 1;
+            }
+            lua_createtable(state, 0, 9);
+            lua_pushinteger(state, static_cast<lua_Integer>(info.owner.value));
+            lua_setfield(state, -2, "owner");
+            lua_pushlstring(state, info.unitType.data(), info.unitType.size());
+            lua_setfield(state, -2, "type");
+            lua_pushinteger(state, static_cast<lua_Integer>(info.hitPoints));
+            lua_setfield(state, -2, "health");
+            lua_pushinteger(state, static_cast<lua_Integer>(info.maxHitPoints));
+            lua_setfield(state, -2, "max_health");
+            lua_pushboolean(state, info.complete);
+            lua_setfield(state, -2, "complete");
+            lua_pushboolean(state, info.dead);
+            lua_setfield(state, -2, "dead");
+            lua_pushnumber(state, info.x);
+            lua_setfield(state, -2, "x");
+            lua_pushnumber(state, info.y);
+            lua_setfield(state, -2, "y");
+            lua_pushnumber(state, info.z);
+            lua_setfield(state, -2, "z");
+            return 1;
+        }
+
         // rwe.unit_get(unit, key) -> value or nil, from this package's
         // namespace in the per-unit scope.
         static int unitGetFunction(lua_State* state)
@@ -476,7 +517,7 @@ namespace rwe
             {
                 return luaL_error(state, "unit_set value must be finite");
             }
-            if (impl->worldUnitExists && !impl->worldUnitExists(impl->worldContext, unit))
+            if (impl->world.unitExists && !impl->world.unitExists(impl->world.context, unit))
             {
                 return luaL_error(state, "unit_set: no unit %d", static_cast<int>(unit.value));
             }
@@ -611,8 +652,7 @@ namespace rwe
         // Not runtime state: the caller sets it from the simulation's own
         // clock before every dispatch, so nothing about it needs saving.
         unsigned int currentTick = 0;
-        const void* worldContext = nullptr;
-        ModRuntimeUnitExists worldUnitExists = nullptr;
+        ModRuntimeWorld world;
     };
 
     ModRuntime::ModRuntime(std::vector<ModRuntimePackage> packages, std::uint32_t seed, ModStateStore& store, ModRuntimeLimits limits)
@@ -622,11 +662,15 @@ namespace rwe
 
     ModRuntime::~ModRuntime() = default;
 
-    void ModRuntime::bind(unsigned int tick, const void* context, ModRuntimeUnitExists unitExists)
+    void ModRuntime::bind(unsigned int tick, const ModRuntimeWorld& world)
     {
         impl_->currentTick = tick;
-        impl_->worldContext = context;
-        impl_->worldUnitExists = unitExists;
+        impl_->world = world;
+    }
+
+    void ModRuntime::bind(unsigned int tick, const void* context, ModRuntimeUnitExists unitExists)
+    {
+        bind(tick, ModRuntimeWorld{context, unitExists, nullptr});
     }
 
     void ModRuntime::onTick(unsigned int tick)

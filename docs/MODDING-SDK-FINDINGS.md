@@ -979,6 +979,35 @@ read, never what any native phase does.
 Still open for #970: filtered queries, deferred effects, the limb-damage
 decision and the two-peer acceptance run.
 
+## MOD-SDK-018: the runtime unit query
+
+Status: implemented 2026-11-04 on `970-shield-example`, after MOD-SDK-017.
+Issue #970, partly. RWE-original; no byte-tactics comparison applies. Not
+compiled locally; CI is the build.
+
+Behind `runtime.unit-query@1`, `rwe.unit_info(unit)` returns a table with
+`owner`, `type` (the FBI name), `health`, `max_health`, `complete`, `dead` and
+`x`/`y`/`z`, or `nil` when there is no such unit.
+
+- It is not filtered by line of sight. A runtime rule runs on every peer over
+  the whole simulation, the way a native rule does, so what one peer could
+  read every peer reads, and the answer is the same everywhere. Filtering by
+  what a player can see belongs to the presentation view (MOD-SDK-013) and to
+  scripted AI's observation policy (MOD-09), not to rules.
+- Positions are the simulation's own floats (`SimScalar`) widened to Lua
+  numbers. They are the same values the sync hash reads, so reading them
+  cannot diverge, although arithmetic a script then does on them is subject to
+  MOD-SDK-004's libm/`^` caveat.
+- `ModRuntime::bind` now takes a `ModRuntimeWorld`: a context pointer and
+  plain function pointers for unit existence and unit info.
+  `GameSimulation::bindModRuntime()` builds one before every dispatch, from
+  file-local callbacks in `GameSimulation.cpp`, so the widely included
+  header gains one declaration and no types. The three-argument `bind`
+  remains for tests that supply only an existence check.
+
+Still open for #970: deferred effects, a decision on limb damage, and the
+two-peer acceptance run.
+
 ## Verification
 
 Executed 2026-11-02: `rwe_test "[modsdk]"` and the full `rwe_test` suite; the

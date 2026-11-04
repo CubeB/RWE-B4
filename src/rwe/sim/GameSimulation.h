@@ -874,9 +874,9 @@ namespace rwe
         ModRuntime* modRuntime() { return modRuntime_.get(); }
         const ModRuntime* modRuntime() const { return modRuntime_.get(); }
         void setModRuntime(std::unique_ptr<ModRuntime> runtime);
-        // ModRuntime::bind's unit-exists check, with this simulation as the
-        // context. Static, so the runtime holds a plain function pointer.
-        static bool modRuntimeUnitExists(const void* simulation, UnitId unit);
+        // Binds this simulation to the runtime before a dispatch: the tick,
+        // and the unit queries a script may make (ModRuntime::bind).
+        void bindModRuntime();
         // MOD-SDK-017: unit lifecycle events for runtime mods. Each does
         // nothing without a runtime. Public because UnitBehaviorService
         // completes units on the simulation's behalf.
