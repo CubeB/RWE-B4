@@ -636,9 +636,26 @@ namespace rwe
         }
         if (j.contains("modState"))
         {
-            auto state = std::make_unique<ModStateStore>();
-            state->loadJson(j.at("modState"));
-            sim.setModState(std::move(state));
+            if (auto* existing = sim.modState())
+            {
+                // In place, for the reason clearSimulationForLoad gives:
+                // the runtime keeps a reference to this object. loadJson is
+                // transactional, so a malformed save leaves it as it was.
+                existing->loadJson(j.at("modState"));
+            }
+            else
+            {
+                auto state = std::make_unique<ModStateStore>();
+                state->loadJson(j.at("modState"));
+                sim.setModState(std::move(state));
+            }
+        }
+        else if (sim.modRuntime())
+        {
+            if (auto* existing = sim.modState())
+            {
+                existing->clear();
+            }
         }
         else
         {
@@ -947,7 +964,20 @@ namespace rwe
         sim.events.clear();
         sim.aiPendingCommands.clear();
         // The load replaces the authoritative mod state with the save's own.
-        sim.setModState(nullptr);
+        // A resolved runtime holds a reference to its store, so with one
+        // attached the store object stays and only its contents go; replacing
+        // it would leave every hook, and the hash, reading freed memory.
+        if (sim.modRuntime())
+        {
+            if (auto* state = sim.modState())
+            {
+                state->clear();
+            }
+        }
+        else
+        {
+            sim.setModState(nullptr);
+        }
     }
 
     void recordAiEngines(GameParameters& parameters, const GameSimulation& sim)
