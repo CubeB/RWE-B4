@@ -1014,8 +1014,38 @@ No shipped package depended on the old conversion. The quota error no longer
 appends the package id; the runtime log already names the package it
 disables.
 
-Still open for #970: deferred effects, a decision on limb damage, and the
-two-peer acceptance run.
+Still open for #970: deferred effects and the two-peer acceptance run. The
+limb-damage decision is MOD-SDK-019.
+
+## MOD-SDK-019: which damage `hook_damage_v1` folds
+
+Status: decision recorded 2026-11-04, closing the "limb damage" question
+MOD-SDK-009 left open. Documentation only; no behaviour changes. RWE-original
+policy, no byte-tactics comparison: every path below keeps the arithmetic its
+existing findings give it.
+
+`hook_damage_v1` folds combat damage to a unit at the final-damage point of
+`GameSimulation::applyDamage`, after attacker veterancy, armour and victim
+veterancy. These are the other places that take hit points off a unit, and
+what the hook does with each:
+
+| Path | Where | Folded? | Why |
+| --- | --- | --- | --- |
+| Remote damage to a unit simulated elsewhere | `applyRemoteDamage`, `SimulationOwnership.cpp` | Never | The owning simulation is authoritative: it runs the real `applyDamage`, fold included, and only its record or death declaration counts. Folding the local copy too would apply the mod twice or disagree with the owner. |
+| Mixed ownership: our attack on a peer's unit | `MixedOwnership.cpp` | Never | The same rule from the attacker's side: the figure is sent to the owner, and the local drop is display only, held above zero. |
+| Reclaim, cause 5 | `GameSimulation.cpp`, reclaim | Not in v1 | The hit points taken decide how much of the cost is handed back, so changing them changes the economy. That needs its own contract (a future `hook_reclaim_v1`), not a quiet widening of combat damage. |
+| A cancelled factory product, cause 9 | `FactoryConstruction.cpp` | No | A fixed rule, not a hit: bypassing armour but keeping victim veterancy is the original's own arithmetic for it. |
+| The end-of-game decay | `GameSimulation_endgame.cpp` | No | The same fixed rule, applied to every unit of a defeated player. A shield absorbing it would be wrong. |
+| Feature damage | `GameSimulation_fire.cpp`, features | Out of scope | The hook is unit-only by contract. Features would get a hook of their own. |
+
+Two consequences for authors:
+
+- In an RWE lockstep game every unit is simulated on every peer, so every
+  combat hit reaches the hook, once, on every peer. The "never" rows apply
+  only to own-clock and mixed-ownership play against an original client,
+  where a remote unit's health is the other side's to decide.
+- A runtime mod that wants to change reclaim, the factory cancel or the decay
+  needs a new hook version. `hook_damage_v1`'s meaning does not grow.
 
 ## Verification
 
