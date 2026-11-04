@@ -12,6 +12,7 @@
 #include <rwe/io/ota/ota.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
+#include <rwe/mod/ModLaunch.h>
 #include <rwe/mod/ModTransform.h>
 #include <rwe/net/ta/TaHostGame.h>
 #include <rwe/util/Index.h>
@@ -227,19 +228,7 @@ namespace rwe
         // weaponP/guiP, Escalation's UNITSE/WEAPONE). The copy lives for the
         // synchronous load; the base mapping is not modified.
         PathMapping modMapping = *sceneContext.pathMapping;
-        if (gameParameters.modContent)
-        {
-            for (const auto& package : gameParameters.modContent->packages)
-            {
-                for (const auto& [name, directory] : package.resourceDirectories)
-                {
-                    if (!applyPathMappingDirectory(modMapping, name, directory))
-                    {
-                        throw std::runtime_error("Mod " + package.id + ": unknown resource directory \"" + name + "\"");
-                    }
-                }
-            }
-        }
+        applyModResourceDirectories(modMapping, gameParameters.modContent.get());
 
         GameLoadServices services{
             sceneContext.vfs,

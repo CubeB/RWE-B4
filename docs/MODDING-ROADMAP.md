@@ -179,6 +179,12 @@ server when they differ. Recorded in MOD-SDK-006. Still open: the full
 resolved-set identity on the wire, launcher re-resolution of a recorded set,
 and a same-seed save/resume and replay test on real data.
 
+Progress 2026-11-04 (local branch `mod-launch-switch`, not yet compiled):
+`rwe` and `ai_arena` take `--mod <rwe_mod.json>` and `--mod-option`. With
+`--replay` or `--load`, the set must match the recording, which is the
+command-line half of re-resolving a recorded set. Recorded in MOD-SDK-015.
+The launcher does not pass `--mod` yet.
+
 ### MOD-07: Deliver the author and player workflow
 
 Dependencies: MOD-03 through MOD-06. Provide a template, create/validate/preview/
@@ -197,6 +203,10 @@ Progress 2026-11-02: `--create-mod`, `--validate-mod`, `--resolve-mods` and
 shipped data (278 units, 270 changed). Recorded in MOD-SDK-007. Still open:
 packaging to a shareable archive, launcher Library presentation, and the
 Windows/Linux network acceptance run.
+
+Progress 2026-11-04 (local, not yet compiled): "play it" now has a path that
+needs no launcher work: `rwe --map <name> --mod <rwe_mod.json>` (MOD-SDK-015).
+The launcher still has to pass it.
 
 ### MOD-08: Introduce runtime rules and authoritative script state
 

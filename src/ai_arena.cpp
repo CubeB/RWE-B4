@@ -66,6 +66,7 @@
 #include <rwe/io/sidedatatdf/SideData.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
+#include <rwe/mod/ModLaunch.h>
 #include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util.h>
@@ -251,6 +252,8 @@ int main(int argc, char* argv[])
                       << "  --strict                exit 1 if no AI-ARENA-RESULT was produced or the watchdog fired\n"
                       << "  --data-path <path>      game data search path (repeatable)\n"
                       << "  --dir-<resource> <dir>  mod resource root, as in rwe (e.g. --dir-ai ae)\n"
+                      << "  --mod <rwe_mod.json>    play with this mod package (repeatable), as in rwe\n"
+                      << "  --mod-option <id>:<key>=<value>  set one of a --mod package's options\n"
                       << "  --replay <file>         play a recorded .rwereplay headlessly instead of --map/--player\n"
                       << "  --list-knobs            print every AI tuning knob (name, type, default) and exit\n"
                       << "  --json                  with --list-knobs, print a JSON array instead of tab-separated text\n";
@@ -327,6 +330,18 @@ int main(int argc, char* argv[])
         if (args.contains("record-demo"))
         {
             gameParameters.recordDemoFile = args.getString("record-demo");
+        }
+
+        // MOD-SDK-015: the same --mod and --mod-option as rwe, so a modded
+        // game -- a Lua AI seat included -- can be measured headlessly.
+        if (!args.getMulti("mod").empty() || !args.getMulti("mod-option").empty())
+        {
+            if (args.contains("record-demo"))
+            {
+                throw std::runtime_error("--mod cannot be recorded into a TA demo");
+            }
+            gameParameters.modContent = applyModArguments(
+                args.getMulti("mod"), args.getMulti("mod-option"), gameParameters.modContent, isReplay);
         }
 
         // A batch cares whether a run actually produced its numbers; the
@@ -459,6 +474,7 @@ int main(int argc, char* argv[])
         } // !isReplay
 
         auto pathMapping = configuredPathMapping(args);
+        applyModResourceDirectories(pathMapping, gameParameters.modContent.get());
 
         std::vector<fs::path> gameDataPaths;
         auto dataPaths = args.getMulti("data-path");
