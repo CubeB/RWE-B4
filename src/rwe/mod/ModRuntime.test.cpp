@@ -239,17 +239,34 @@ namespace rwe
         CHECK_FALSE(fixture.store.getUnit("a.unit", UnitId(9), "seen"));
     }
 
-    TEST_CASE("unit_set refuses values the store cannot hold", "[modsdk][modruntime]")
+    TEST_CASE("unit_set refuses a table value", "[modsdk][modruntime]")
     {
-        for (const std::string value : {"{}", "0/0", "nil"})
-        {
-            INFO(value);
-            Fixture fixture({package("a.bad",
-                "function hook_damage_v1(v, a, amount, paralyzer, prev) rwe.unit_set(v, 'k', " + value
-                    + ") return prev end")});
-            CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 7.0f, false) == 7.0f);
-            CHECK(fixture.runtime.disabledPackages().size() == 1);
-        }
+        // One case per value, so a crash names the value that caused it
+        // (MSVC Release, 2026-11-04).
+        Fixture fixture({package("a.bad",
+            "function hook_damage_v1(v, a, amount, paralyzer, prev) rwe.unit_set(v, 'k', {}) return prev end")});
+        CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 7.0f, false) == 7.0f);
+        CHECK(fixture.runtime.disabledPackages().size() == 1);
+    }
+
+    TEST_CASE("unit_set refuses a value that is not finite", "[modsdk][modruntime]")
+    {
+        // One case per value, so a crash names the value that caused it
+        // (MSVC Release, 2026-11-04).
+        Fixture fixture({package("a.bad",
+            "function hook_damage_v1(v, a, amount, paralyzer, prev) rwe.unit_set(v, 'k', 0/0) return prev end")});
+        CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 7.0f, false) == 7.0f);
+        CHECK(fixture.runtime.disabledPackages().size() == 1);
+    }
+
+    TEST_CASE("unit_set refuses a nil value", "[modsdk][modruntime]")
+    {
+        // One case per value, so a crash names the value that caused it
+        // (MSVC Release, 2026-11-04).
+        Fixture fixture({package("a.bad",
+            "function hook_damage_v1(v, a, amount, paralyzer, prev) rwe.unit_set(v, 'k', nil) return prev end")});
+        CHECK(fixture.runtime.adjustDamage(UnitId(3), UnitId(4), 7.0f, false) == 7.0f);
+        CHECK(fixture.runtime.disabledPackages().size() == 1);
     }
 
     TEST_CASE("the shield example absorbs, regenerates and survives a save", "[modsdk][modruntime]")
