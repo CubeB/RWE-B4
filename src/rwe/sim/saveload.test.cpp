@@ -5,6 +5,7 @@
 #include <rwe/game/save_util.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
+#include <rwe/mod/ModRuntime.h>
 #include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/GameSimulation.h>
@@ -315,6 +316,46 @@ namespace rwe
         loadSimulationFromJson(plainSave, restored);
         CHECK_FALSE(restored.modState());
         CHECK(computeHashOf(restored) == plainHash);
+    }
+
+    TEST_CASE("a loaded game keeps its runtime pointed at the live store", "[saveload][modsdk][modruntime]")
+    {
+        // The loader builds the runtime against its own store before the save
+        // is read. Replacing that store during the load left the runtime, and
+        // the sync hash it feeds, reading the destroyed one.
+        const auto attach = [](GameSimulation& sim) {
+            sim.setModState(std::make_unique<ModStateStore>());
+            sim.setModRuntime(std::make_unique<ModRuntime>(
+                std::vector<ModRuntimePackage>{
+                    {"a.count", "a.count/scripts/main.lua",
+                        "function on_tick(tick) rwe.store_set('n', (rwe.store_get('n') or 0) + 1) end",
+                        nlohmann::json::object()}},
+                7,
+                *sim.modState()));
+        };
+
+        GameSimulation original(makeFlatTerrain(32, 32), 0u, 100, 3000);
+        attach(original);
+        original.modRuntime()->onTick(1);
+        original.modRuntime()->onTick(2);
+        const auto saved = saveSimulationToJson(original);
+
+        GameSimulation restored(makeFlatTerrain(32, 32), 0u, 100, 3000);
+        attach(restored);
+        const auto* storeBefore = restored.modState();
+        loadSimulationFromJson(saved, restored);
+
+        REQUIRE(restored.modState() == storeBefore);
+        REQUIRE(&restored.modRuntime()->store() == restored.modState());
+        CHECK(restored.modState()->getGlobal("a.count", "n")->f32 == 2.0f);
+        CHECK(computeHashOf(restored) == computeHashOf(original));
+
+        // And the resumed runtime carries on from the saved count.
+        original.modRuntime()->onTick(3);
+        restored.modRuntime()->onTick(3);
+        CHECK(restored.modState()->getGlobal("a.count", "n")->f32 == 3.0f);
+        CHECK(computeHashOf(restored) == computeHashOf(original));
+        CHECK(restored.modRuntime()->disabledPackages().empty());
     }
 
     TEST_CASE("a saved simulation replays tick for tick from its save", "[saveload]")
