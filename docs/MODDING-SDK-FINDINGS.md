@@ -1178,9 +1178,16 @@ and the launcher's legacy key names (`builderGuis`) are not the manifest's
 vocabularies.
 
 The lobby still compares archives, manifest bytes and entry scripts
-(MOD-SDK-006, MOD-SDK-014), not the engine's resolved identity, which a
-player could still differ on through `--mod-option`. Exchanging that identity
-is the rest of #979.
+(MOD-SDK-006, MOD-SDK-014), not the engine's resolved identity. For now that
+is equivalent rather than weaker. The identity is a function of the manifest
+bytes, the entry scripts, the load order, the features and the options. The
+first two are compared, the order and features follow from the manifests
+deterministically, and the launcher passes no `--mod-option`, so every peer
+resolves with each package's defaults. Two peers that pass the lobby's check
+therefore resolve the same identity. The identity on the wire (#979) becomes
+necessary the day the lobby lets a room choose options. It should land with
+that feature, so that the room's chosen options are what is compared, not
+added now as a second copy of the same check.
 
 ## Verification
 
