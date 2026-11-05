@@ -936,12 +936,15 @@ namespace rwe
 
     void GameScene::saveInGameOptions()
     {
+        auto options = currentInGameOptions();
+        // The next game scene starts from the live config (#987).
+        applyOptionsToConfig(*sceneContext.globalConfig, options);
         auto localDataPath = getLocalDataPath();
         if (!localDataPath)
         {
             return;
         }
-        writeGameOptions(*localDataPath / "rwe.cfg", currentInGameOptions());
+        writeGameOptions(*localDataPath / "rwe.cfg", options);
     }
 
     void GameScene::exitToMainMenu()

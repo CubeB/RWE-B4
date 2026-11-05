@@ -497,6 +497,16 @@ namespace rwe
     /** The settings as the config file last left them. */
     GameOptions optionsFromConfig(const GlobalConfig& config);
 
+    /**
+     * The inverse: the seventeen settings written into the live config,
+     * every other field left alone. Both options screens call this when
+     * they save, because GameScene reads its settings from the live config
+     * when it is built; without it a mode chosen on the front end was
+     * written to rwe.cfg and then written back over by the in-game
+     * screen's OK, which still held the launch-time value (#987).
+     */
+    void applyOptionsToConfig(GlobalConfig& config, const GameOptions& options);
+
     /** The label the window mode button shows for a config value. */
     const char* windowModeDisplayName(const std::string& mode);
 

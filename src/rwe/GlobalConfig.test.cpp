@@ -256,6 +256,69 @@ namespace rwe
         }
     }
 
+    TEST_CASE("applyOptionsToConfig is the inverse of optionsFromConfig (#987)")
+    {
+        SECTION("every saved setting lands in the live config")
+        {
+            // The front end's OK writes rwe.cfg and the next GameScene
+            // reads the live config: the two have to agree, or the in-game
+            // OK writes the launch-time values back over the file.
+            GameOptions options;
+            options.soundVolume = 40;
+            options.musicVolume = 55;
+            options.musicEnabled = false;
+            options.windowMode = "borderless";
+            options.shadows = false;
+            options.scrollSpeed = 70;
+            options.soundMode = SoundMode::Off;
+            options.unitSpeech = UnitSpeechLevel::Off;
+            options.musicTrackMode = MusicTrackMode::Random;
+            options.musicTrackTypes = {1, 0, 1};
+            options.gamma = 120;
+            options.shading = ShadingMode::Off;
+            options.antiAlias = false;
+            options.buildingHalo = false;
+            options.antiAliasUnits = true;
+            options.cameraZoom = 150;
+            options.uiScale = 200;
+
+            GlobalConfig config;
+            applyOptionsToConfig(config, options);
+            REQUIRE(config.soundMode == 0u);
+
+            auto back = optionsFromConfig(config);
+            REQUIRE(back.soundVolume == options.soundVolume);
+            REQUIRE(back.musicVolume == options.musicVolume);
+            REQUIRE(back.musicEnabled == options.musicEnabled);
+            REQUIRE(back.windowMode == options.windowMode);
+            REQUIRE(back.shadows == options.shadows);
+            REQUIRE(back.scrollSpeed == options.scrollSpeed);
+            REQUIRE(back.soundMode == options.soundMode);
+            REQUIRE(back.unitSpeech == options.unitSpeech);
+            REQUIRE(back.musicTrackMode == options.musicTrackMode);
+            REQUIRE(back.musicTrackTypes == options.musicTrackTypes);
+            REQUIRE(back.gamma == options.gamma);
+            REQUIRE(back.shading == options.shading);
+            REQUIRE(back.antiAlias == options.antiAlias);
+            REQUIRE(back.buildingHalo == options.buildingHalo);
+            REQUIRE(back.antiAliasUnits == options.antiAliasUnits);
+            REQUIRE(back.cameraZoom == options.cameraZoom);
+            REQUIRE(back.uiScale == options.uiScale);
+        }
+
+        SECTION("fields the options screens do not own are left alone")
+        {
+            GlobalConfig config;
+            config.leftClickInterfaceMode = false;
+            config.vehicleShadows = false;
+            config.switchAlt = true;
+            applyOptionsToConfig(config, GameOptions());
+            REQUIRE_FALSE(config.leftClickInterfaceMode);
+            REQUIRE_FALSE(config.vehicleShadows);
+            REQUIRE(config.switchAlt);
+        }
+    }
+
     TEST_CASE("camera zoom slider mapping")
     {
         SECTION("the ends of the slider are the ends of the range")

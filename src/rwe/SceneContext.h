@@ -31,7 +31,13 @@ namespace rwe
         const std::unordered_map<std::string, SideData>* const sideData;
         TimeService* const timeService;
         const PathMapping* const pathMapping;
-        const GlobalConfig* const globalConfig;
+        /**
+         * Mutable on purpose: the two options screens write their settings
+         * back here when they save, so a scene built later in the same
+         * run starts from what was saved and not from what rwe.cfg held
+         * at launch (#987).
+         */
+        GlobalConfig* const globalConfig;
 
         SceneContext(
             SdlContext* const sdl,
@@ -48,7 +54,7 @@ namespace rwe
             const std::unordered_map<std::string, SideData>* const sideData,
             TimeService* const timeService,
             const PathMapping* const pathMapping,
-            const GlobalConfig* const globalConfig)
+            GlobalConfig* const globalConfig)
             : sdl(sdl),
               viewport(viewportService),
               graphics(graphics),

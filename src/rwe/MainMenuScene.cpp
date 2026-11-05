@@ -240,12 +240,16 @@ namespace rwe
 
     void MainMenuScene::saveOptions()
     {
+        auto options = currentOptions();
+        // The game scene built for the next skirmish reads the live config,
+        // not rwe.cfg, so what is saved has to land there too (#987).
+        applyOptionsToConfig(*sceneContext.globalConfig, options);
         auto localDataPath = getLocalDataPath();
         if (!localDataPath)
         {
             return;
         }
-        writeGameOptions(*localDataPath / "rwe.cfg", currentOptions());
+        writeGameOptions(*localDataPath / "rwe.cfg", options);
     }
 
     void MainMenuScene::goToOptionsMenu()

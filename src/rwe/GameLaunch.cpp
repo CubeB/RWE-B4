@@ -382,6 +382,12 @@ namespace rwe
         audioService.setMusicEnabled(globalConfig.musicEnabled);
         audioService.setSoundEnabled(globalConfig.soundMode != 0);
         audioService.allocateTracks(256);
+        // Said in the log because a game with music and no effects is the
+        // sound mode sitting on Off, and the options TEST button is gated by
+        // the same switch, so nothing on screen says so (#987).
+        LOG_INFO << "Audio: effects " << (globalConfig.soundMode != 0 ? "on" : "OFF (sound-mode=0 in rwe.cfg)")
+                 << " at " << globalConfig.soundVolume << "%, music " << (globalConfig.musicEnabled ? "on" : "off")
+                 << " at " << globalConfig.musicVolume << "%";
 
         LOG_INFO << "Loading global sound definitions";
         auto allSoundBytes = vfs.readFile("gamedata/ALLSOUND.TDF");

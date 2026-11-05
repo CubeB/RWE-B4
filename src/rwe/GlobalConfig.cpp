@@ -248,6 +248,27 @@ namespace rwe
         return options;
     }
 
+    void applyOptionsToConfig(GlobalConfig& config, const GameOptions& options)
+    {
+        config.soundVolume = options.soundVolume;
+        config.musicVolume = options.musicVolume;
+        config.musicEnabled = options.musicEnabled;
+        config.windowMode = options.windowMode;
+        config.shadows = options.shadows;
+        config.scrollSpeed = options.scrollSpeed;
+        config.soundMode = static_cast<unsigned int>(options.soundMode);
+        config.unitSpeech = static_cast<unsigned int>(options.unitSpeech);
+        config.musicTrackMode = static_cast<unsigned int>(options.musicTrackMode);
+        config.musicTrackTypes = options.musicTrackTypes;
+        config.gamma = options.gamma;
+        config.shadingMode = static_cast<unsigned int>(options.shading);
+        config.antiAlias = options.antiAlias;
+        config.buildingHalo = options.buildingHalo;
+        config.antiAliasUnits = options.antiAliasUnits;
+        config.cameraZoom = options.cameraZoom;
+        config.uiScale = options.uiScale;
+    }
+
     const char* windowModeDisplayName(const std::string& mode)
     {
         if (mode == "borderless")
